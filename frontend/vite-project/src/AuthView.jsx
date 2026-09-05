@@ -15,25 +15,7 @@ async function apiRequest(path, body) {
   return data;
 }
 
-// diff roles
-async function loginSmart({ email, password }) {
-  const roles = ["student", "advisor", "registrar"];
-  let lastErr;
-  for (const role of roles) {
-    try {
-      const data = await apiRequest("/auth/login", { email, password, role });
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user)); 
-      return data;
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error("Login failed");
-}
-
 async function signupUser(payload) {
-
   return apiRequest("/auth/signup", payload);
 }
 
@@ -64,35 +46,57 @@ function EyeIcon({ open }) {
   );
 }
 
-// sign in
-function LoginForm({ onSwitch }) {
+// ─── Step 1: credentials ─────────────────────────────────────────────────────
+
+function CredentialsStep({ onPreAuth }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const canSubmit = username.trim().length > 0 && password.length > 0;
 
   const onSubmit = async (e) => {
     e.preventDefault();
     if (!canSubmit) return;
+    setError("");
+    setLoading(true);
 
-    try {
-      const { user } = await loginSmart({ email: username.trim(), password });
-
-      if (user.role === "advisor") window.location.href = "/advisor";
-      else if (user.role === "registrar") window.location.href = "/registrar";
-      else window.location.href = "/student";
-    } catch (err) {
-      alert(err.message || "Login failed");
+    // Try each role until one succeeds (mirrors the original loginSmart logic).
+    const roles = ["student", "advisor", "registrar"];
+    let lastErr;
+    for (const role of roles) {
+      try {
+        const data = await apiRequest("/auth/login", {
+          email: username.trim(),
+          password,
+          role,
+        });
+        // data = { preAuthToken, totp_enabled }
+        onPreAuth(data.preAuthToken, data.totp_enabled);
+        setLoading(false);
+        return;
+      } catch (e) {
+        lastErr = e;
+      }
     }
+
+    setError(lastErr?.message || "Login failed");
+    setLoading(false);
   };
 
   return (
     <>
       <h2 className="login-card__heading">Sign in to your account</h2>
 
-      <form className="login-form" onSubmit={onSubmit} autoComplete="on">
+      {error && (
+        <p style={{ color: "#dc2626", fontSize: 13, textAlign: "center", marginBottom: 4 }}>
+          {error}
+        </p>
+      )}
 
+      <form className="login-form" onSubmit={onSubmit} autoComplete="on">
         <label htmlFor="li-username" className="field__label">
           Email
         </label>
@@ -106,7 +110,6 @@ function LoginForm({ onSwitch }) {
           autoComplete="username"
         />
 
-        {/* Password */}
         <label htmlFor="li-password" className="field__label">
           Password
         </label>
@@ -130,36 +133,292 @@ function LoginForm({ onSwitch }) {
           </button>
         </div>
 
-        {/* swiych to sign up */}
-        <div className="form-row form-row--right">
-          <a
-            href="#"
-            className="link"
-            onClick={(e) => {
-              e.preventDefault();
-              onSwitch();
-            }}
-          >
-            No account? Sign up here
-          </a>
-        </div>
-
-        {/* submit */}
-        <button type="submit" className="btn btn-primary" disabled={!canSubmit}>
-          Sign In
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={!canSubmit || loading}
+        >
+          {loading ? "Checking…" : "Continue"}
         </button>
       </form>
     </>
   );
 }
 
-// sign up
+// ─── Step 2a: TOTP setup (first-time enrollment) ─────────────────────────────
+
+function TotpSetupStep({ preAuthToken, onVerified, onExpired }) {
+  const [qrCode, setQrCode] = useState(null);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [loadingQr, setLoadingQr] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+
+  const fetchQr = async () => {
+    setLoadingQr(true);
+    setError("");
+    try {
+      const data = await apiRequest("/auth/setup-totp", { preAuthToken });
+      setQrCode(data.qrCode);
+    } catch (e) {
+      if (e.message.toLowerCase().includes("expired") || e.message.toLowerCase().includes("invalid")) {
+        onExpired();
+      } else {
+        setError(e.message || "Failed to generate QR code");
+      }
+    } finally {
+      setLoadingQr(false);
+    }
+  };
+
+  // Fetch the QR code on mount.
+  React.useEffect(() => {
+    fetchQr();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setVerifying(true);
+    try {
+      const data = await apiRequest("/auth/verify-totp", { preAuthToken, code });
+      onVerified(data);
+    } catch (e) {
+      if (e.message.toLowerCase().includes("expired") || e.message.toLowerCase().includes("invalid")) {
+        onExpired();
+      } else {
+        setError(e.message || "Verification failed");
+      }
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <>
+      <h2 className="login-card__heading">Set up two-factor authentication</h2>
+
+      <div style={{ width: "min(430px, 100%)", margin: "0 auto", paddingLeft: 20, paddingRight: 20 }}>
+        <p style={{ fontSize: 13.5, color: "#4b5563", marginBottom: 16, lineHeight: 1.55 }}>
+          Scan the QR code below with an authenticator app (e.g.{" "}
+          <strong>Google Authenticator</strong> or <strong>Authy</strong>), then enter
+          the 6-digit code to complete setup.
+        </p>
+
+        {loadingQr && (
+          <p style={{ textAlign: "center", color: "#9aa3ad", fontSize: 13 }}>
+            Generating QR code…
+          </p>
+        )}
+
+        {qrCode && !loadingQr && (
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <img
+              src={qrCode}
+              alt="Scan this QR code with your authenticator app"
+              style={{
+                width: 200,
+                height: 200,
+                borderRadius: 8,
+                border: "1px solid #dce3ec",
+                padding: 8,
+                background: "#fff",
+              }}
+            />
+          </div>
+        )}
+
+        {error && (
+          <p style={{ color: "#dc2626", fontSize: 13, marginBottom: 8, textAlign: "center" }}>
+            {error}
+          </p>
+        )}
+
+        <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+          <label htmlFor="totp-setup-code" className="field__label">
+            6-digit code from your authenticator app
+          </label>
+          <input
+            id="totp-setup-code"
+            className="field__input"
+            type="text"
+            inputMode="numeric"
+            pattern="\d{6}"
+            maxLength={6}
+            placeholder="000000"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+            autoComplete="one-time-code"
+            style={{ letterSpacing: "0.25em", textAlign: "center", fontSize: 18 }}
+          />
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={code.length !== 6 || verifying}
+          >
+            {verifying ? "Verifying…" : "Activate 2FA & Sign In"}
+          </button>
+        </form>
+      </div>
+    </>
+  );
+}
+
+// ─── Step 2b: TOTP verify (returning user) ───────────────────────────────────
+
+function TotpVerifyStep({ preAuthToken, onVerified, onExpired }) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [verifying, setVerifying] = useState(false);
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setVerifying(true);
+    try {
+      const data = await apiRequest("/auth/verify-totp", { preAuthToken, code });
+      onVerified(data);
+    } catch (e) {
+      if (e.message.toLowerCase().includes("expired") || e.message.toLowerCase().includes("invalid")) {
+        onExpired();
+      } else {
+        setError(e.message || "Verification failed");
+      }
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <>
+      <h2 className="login-card__heading">Two-factor authentication</h2>
+
+      <div style={{ width: "min(430px, 100%)", margin: "0 auto", paddingLeft: 20, paddingRight: 20 }}>
+        <p style={{ fontSize: 13.5, color: "#4b5563", marginBottom: 16, lineHeight: 1.55 }}>
+          Open your authenticator app and enter the 6-digit code for{" "}
+          <strong>Bracu Central</strong>.
+        </p>
+
+        {error && (
+          <p style={{ color: "#dc2626", fontSize: 13, marginBottom: 8, textAlign: "center" }}>
+            {error}
+          </p>
+        )}
+
+        <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+          <label htmlFor="totp-verify-code" className="field__label">
+            Authenticator code
+          </label>
+          <input
+            id="totp-verify-code"
+            className="field__input"
+            type="text"
+            inputMode="numeric"
+            pattern="\d{6}"
+            maxLength={6}
+            placeholder="000000"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+            autoComplete="one-time-code"
+            autoFocus
+            style={{ letterSpacing: "0.25em", textAlign: "center", fontSize: 18 }}
+          />
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={code.length !== 6 || verifying}
+          >
+            {verifying ? "Verifying…" : "Verify & Sign In"}
+          </button>
+
+          <div className="form-row form-row--right" style={{ marginTop: -4 }}>
+            <button
+              type="button"
+              className="link-button link"
+              style={{ fontSize: 13 }}
+              onClick={onExpired}
+            >
+              ← Back to login
+            </button>
+          </div>
+        </form>
+      </div>
+    </>
+  );
+}
+
+// ─── LoginForm orchestrator ───────────────────────────────────────────────────
+
+function LoginForm({ onSwitch }) {
+  // stage: "credentials" | "setup" | "verify"
+  const [stage, setStage] = useState("credentials");
+  const [preAuthToken, setPreAuthToken] = useState(null);
+
+  const handlePreAuth = (token, totpEnabled) => {
+    setPreAuthToken(token);
+    setStage(totpEnabled ? "verify" : "setup");
+  };
+
+  const handleVerified = ({ token, user }) => {
+    localStorage.setItem("token", token);
+    localStorage.setItem("user", JSON.stringify(user));
+    if (user.role === "advisor") window.location.href = "/advisor";
+    else if (user.role === "registrar") window.location.href = "/registrar";
+    else window.location.href = "/student";
+  };
+
+  const handleExpired = () => {
+    setPreAuthToken(null);
+    setStage("credentials");
+  };
+
+  if (stage === "setup") {
+    return (
+      <TotpSetupStep
+        preAuthToken={preAuthToken}
+        onVerified={handleVerified}
+        onExpired={handleExpired}
+      />
+    );
+  }
+
+  if (stage === "verify") {
+    return (
+      <TotpVerifyStep
+        preAuthToken={preAuthToken}
+        onVerified={handleVerified}
+        onExpired={handleExpired}
+      />
+    );
+  }
+
+  return (
+    <>
+      <CredentialsStep onPreAuth={handlePreAuth} />
+      <div className="form-row form-row--right" style={{ width: "min(430px, 100%)", margin: "8px auto 0", paddingLeft: 20, paddingRight: 20 }}>
+        <a
+          href="#"
+          className="link"
+          onClick={(e) => {
+            e.preventDefault();
+            onSwitch();
+          }}
+        >
+          No account? Sign up here
+        </a>
+      </div>
+    </>
+  );
+}
+
+// ─── SignupForm ───────────────────────────────────────────────────────────────
+
 function SignupForm({ onSwitch }) {
   const [fullName, setFullName] = useState("");
   const [userId, setUserId] = useState("");
   const [email, setEmail] = useState("");
-  const [accountType, setAccountType] = useState("student"); // student | advisor | registrar
-  const [credit, setCredit] = useState(""); // optional if student
+  const [accountType, setAccountType] = useState("student");
+  const [credit, setCredit] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [sending, setSending] = useState(false);
@@ -180,7 +439,7 @@ function SignupForm({ onSwitch }) {
         name: fullName.trim(),
         id: userId.trim(),
         email: email.trim(),
-        role: accountType, 
+        role: accountType,
         password,
       };
       if (accountType === "student" && credit !== "") {
@@ -277,7 +536,6 @@ function SignupForm({ onSwitch }) {
           </>
         )}
 
-
         <label htmlFor="su-password" className="field__label">
           Password
         </label>
@@ -324,6 +582,8 @@ function SignupForm({ onSwitch }) {
     </>
   );
 }
+
+// ─── Root ─────────────────────────────────────────────────────────────────────
 
 export default function AuthView() {
   const [mode, setMode] = useState("login"); // "login" | "signup"

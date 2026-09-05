@@ -106,6 +106,40 @@ const emailLookup = `${LOOKUP_KEY_VERSION}:${digest}`;
 
 The HMAC key is separate from the AES encryption key. A database user who does not have the application secrets cannot create valid lookup values or valid encrypted payloads.
 
+### Two-Factor Authentication (2FA)
+
+Login uses a two-step TOTP-based authentication flow. The first step verifies the user's email, password, and role. It does not issue the normal session token. Instead, it issues a short-lived JWT with the stage `pre-auth` and a five-minute expiration.
+
+The second step requires a six-digit time-based one-time password from an authenticator application. Only after the TOTP code is verified does the backend issue the normal one-hour session JWT used by protected routes.
+
+The flow is:
+
+1. `POST /auth/login` verifies the bcrypt password and returns `preAuthToken` plus the account's `totp_enabled` status.
+2. A new account, or an account without completed enrollment, calls `POST /auth/setup-totp` with the pre-auth token. The backend generates a TOTP secret, stores an encrypted copy, and returns an `otpauth://` URL and QR-code data for an authenticator app.
+3. The user enters the authenticator code through `POST /auth/verify-totp`.
+4. The backend decrypts the stored secret, validates the code with a one-step clock-skew window, enables TOTP on first successful verification, and returns the full session token.
+
+The TOTP secret is encrypted with the existing AES-256-GCM field-encryption service before storage. It is never returned as plaintext by the API. Passwords remain bcrypt hashes and are never decrypted.
+
+```javascript
+// Step 1: password verification returns a limited pre-auth token.
+const preAuthToken = issuePreAuthToken(user.user_id);
+
+// Step 2: the secret is encrypted before it is stored.
+const encryptedSecret = encryptValue(plaintextSecret);
+
+// Step 3: the secret is decrypted only inside the verification path.
+const plaintextSecret = decryptValue(user.totp_secret);
+const valid = speakeasy.totp.verify({
+	secret: plaintextSecret,
+	encoding: 'base32',
+	token: String(code).replace(/\s/g, ''),
+	window: 1,
+});
+```
+
+The pre-auth token is intentionally accepted only by the enrollment and verification handlers. It is not a replacement for the full session token and cannot be used to access student, advisor, registrar, or chat routes.
+
 ### Key Configuration and Versions
 
 The application loads cryptographic secrets from environment variables rather than storing them in the database:
@@ -216,7 +250,13 @@ The migration script:
 
 For a clean encrypted schema bootstrap, use [migrations/university5_encrypted_schema.sql](migrations/university5_encrypted_schema.sql).
 
-### Chat Database Setup
+If the database was created before 2FA was added, apply the TOTP migration once:
+
+```bash
+mysql -u <db_user> -p <database_name> < migrations/add_totp_to_user.sql
+```
+
+### Encrypted Student-Advisor Chat
 
 Apply the chat migration after the main university schema has been created:
 
@@ -224,7 +264,106 @@ Apply the chat migration after the main university schema has been created:
 mysql -u <db_user> -p <database_name> < migrations/chat_schema.sql
 ```
 
-The migration creates `user_ecc_key`, `chat_session`, and `chat_message`. The backend generates each user's ECC key pair through `crypto101` when the user starts or joins a conversation. A shared AES session key is wrapped separately for the student and advisor with ECC, while each message is stored with AES-GCM ciphertext, an IV, and an authentication tag.
+The migration creates `user_ecc_key`, `chat_session`, and `chat_message`. Chat uses a hybrid design so that ECC protects the session key and AES-GCM protects message content:
+
+#### 1. Participant key pairs
+
+When a user first starts or joins a chat, the backend generates an ECC key pair through the project's `crypto101` bridge. The public coordinates identify the participant's key, while the private scalar is used by the backend to unwrap that participant's session key.
+
+#### 2. Per-conversation session key
+
+When a student and advisor start a new conversation, the backend generates one random curve point and derives a 32-byte AES key from that point. The same AES key is encrypted twice with ECC: once for the student's public key and once for the advisor's public key. The conversation stores both encrypted key packages, so either authorized participant can recover the session key with their own private key.
+
+This means the student can choose any advisor returned by `GET /chat/advisors`, and each student-advisor pair has its own `chat_session` record. The unique student/advisor constraint prevents duplicate sessions.
+
+#### 3. Message confidentiality and integrity
+
+Before a message is stored, the backend recovers the participant's AES session key and encrypts the trimmed message with AES-256-GCM. Every message receives a fresh random 12-byte IV and a GCM authentication tag. The database stores only the ciphertext, IV, and tag in `chat_message`.
+
+```javascript
+const iv = crypto.randomBytes(12);
+const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
+const ciphertext = Buffer.concat([
+	cipher.update(message, 'utf8'),
+	cipher.final(),
+]);
+const authTag = cipher.getAuthTag();
+```
+
+During retrieval, the backend unwraps the session key, verifies the GCM authentication tag, and decrypts each message. If the ciphertext, IV, or tag was changed, decryption fails and the modified message is not returned as trusted text.
+
+#### 4. Authorization and participant access
+
+All `/chat` routes require a valid full JWT. The backend also checks that the authenticated student owns the requested student side of the session or that the authenticated advisor owns the advisor side. A user cannot read or send messages to an unrelated session by changing a session ID.
+
+The advisor contact list is limited to the authenticated advisor's existing chat sessions. The student advisor list is restricted to the student role. The frontend displays message text and timestamps only; ECC keys, AES keys, IVs, tags, and ciphertext are never shown to users.
+
+#### 5. Chat storage layout
+
+```text
+user_ecc_key
+	user_id, public_key_x, public_key_y, private_key
+
+chat_session
+	student_id, advisor_id
+	student_encrypted_key, advisor_encrypted_key
+
+chat_message
+	session_id, sender_role, sender_id
+	ciphertext, iv, auth_tag, created_at
+```
+
+The current implementation stores ECC key material in the application database so the backend can perform the unwrap operation. Production deployments should protect database access and consider moving private key storage to a dedicated key-management service. MySQL inspection can confirm the presence of protected fields, but it cannot decrypt chat messages without the backend keys and crypto services.
+
+### Cryptography Inspection SQL
+
+Use these commands to inspect chat and 2FA storage without selecting plaintext message content or TOTP secrets:
+
+```sql
+-- Confirm 2FA columns and encrypted secret metadata.
+DESCRIBE user;
+
+SELECT
+	user_id,
+	totp_enabled,
+	CASE WHEN totp_secret IS NULL THEN 'not enrolled' ELSE 'encrypted secret stored' END AS totp_status,
+	CHAR_LENGTH(totp_secret) AS encrypted_totp_length
+FROM user;
+
+-- Confirm ECC participant key records.
+DESCRIBE user_ecc_key;
+
+SELECT user_id, CHAR_LENGTH(public_key_x) AS public_x_length,
+			 CHAR_LENGTH(public_key_y) AS public_y_length,
+			 CHAR_LENGTH(private_key) AS private_key_length,
+			 created_at
+FROM user_ecc_key;
+
+-- Inspect chat sessions without exposing wrapped key contents.
+SELECT
+	session_id,
+	student_id,
+	advisor_id,
+	CHAR_LENGTH(student_encrypted_key) AS student_key_package_length,
+	CHAR_LENGTH(advisor_encrypted_key) AS advisor_key_package_length,
+	created_at
+FROM chat_session;
+
+-- Inspect message metadata and protected payload lengths only.
+SELECT
+	message_id,
+	session_id,
+	sender_role,
+	sender_id,
+	CHAR_LENGTH(ciphertext) AS ciphertext_length,
+	CHAR_LENGTH(iv) AS iv_length,
+	CHAR_LENGTH(auth_tag) AS auth_tag_length,
+	created_at
+FROM chat_message
+ORDER BY created_at DESC;
+```
+
+Do not run `SELECT totp_secret`, `SELECT private_key`, `SELECT ciphertext`, or the wrapped session-key columns when demonstrating the system. Those values are protected backend data, not user-facing output. Use the authenticated API and the crypto services for enrollment, message delivery, authentication-tag verification, and decryption.
 
 ## API Endpoints
 
@@ -233,7 +372,9 @@ The migration creates `user_ecc_key`, `chat_session`, and `chat_message`. The ba
 | Method | Endpoint | Params / Body                  |
 | ------ | -------- | ------------------------------ |
 | POST   | /auth/signup | name, email, password, role |
-| POST   | /auth/login  | email, password             |
+| POST   | /auth/login  | email, password, role       |
+| POST   | /auth/setup-totp | preAuthToken              |
+| POST   | /auth/verify-totp | preAuthToken, code       |
 
 ---
 
@@ -290,7 +431,7 @@ The migration creates `user_ecc_key`, `chat_session`, and `chat_message`. The ba
 
 ### Chat
 
-Chat routes require authentication. Students chat with the configured advisor; advisors provide the selected `studentId` when opening a conversation.
+Chat routes require the full session token issued after 2FA. Students can choose an advisor from `/chat/advisors`; advisors can choose from their student contacts or provide a `studentId` when opening a conversation.
 
 | Method | Endpoint                         | Params / Body             |
 | ------ | -------------------------------- | ------------------------- |

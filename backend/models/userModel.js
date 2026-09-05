@@ -38,7 +38,7 @@ export async function findUserByEmail(email) {
   const emailLookup = getEmailLookup(normalizedEmail);
 
   const [rows] = await pool.query(
-    `SELECT user_id, email_encrypted, name_encrypted, password
+    `SELECT user_id, email_encrypted, name_encrypted, password, totp_secret, totp_enabled
      FROM user
      WHERE email_lookup = ?
      LIMIT 1`,
@@ -53,7 +53,45 @@ export async function findUserByEmail(email) {
     email: decryptValue(user.email_encrypted),
     name: decryptValue(user.name_encrypted),
     password: user.password,
+    totp_secret: user.totp_secret,
+    totp_enabled: !!user.totp_enabled,
   };
+}
+
+export async function getUserById(userId) {
+  const [rows] = await pool.query(
+    `SELECT user_id, email_encrypted, name_encrypted, totp_secret, totp_enabled
+     FROM user
+     WHERE user_id = ?
+     LIMIT 1`,
+    [userId]
+  );
+
+  if (rows.length === 0) return null;
+
+  const user = rows[0];
+  return {
+    user_id: user.user_id,
+    email: decryptValue(user.email_encrypted),
+    name: decryptValue(user.name_encrypted),
+    totp_secret: user.totp_secret,
+    totp_enabled: !!user.totp_enabled,
+  };
+}
+
+export async function saveTotpSecret(userId, plaintextSecret) {
+  const encryptedSecret = encryptValue(plaintextSecret);
+  await pool.query(
+    `UPDATE user SET totp_secret = ?, totp_enabled = 0 WHERE user_id = ?`,
+    [encryptedSecret, userId]
+  );
+}
+
+export async function enableTotp(userId) {
+  await pool.query(
+    `UPDATE user SET totp_enabled = 1 WHERE user_id = ?`,
+    [userId]
+  );
 }
 
 export async function getUserRole(userId) {
