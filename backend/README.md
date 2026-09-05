@@ -156,6 +156,45 @@ Chat ECC private keys are no longer stored as plaintext in `user_ecc_key.private
 
 To rotate the server key, use the internal `rotateManagedKey()` operation from a controlled administrative script. The previous key is retained as `server_rsa_keys_<version>.json` until all ciphertext created with that version has been re-encrypted. Never delete a retired key before its data has been verified.
 
+### Encrypted Course and Section Data
+
+Course and section descriptive fields are encrypted with the server RSA key before they are stored:
+
+- Course title
+- Course name
+- Exam schedule
+- Section schedule
+- Faculty name
+
+The backend decrypts these fields before returning course lists, course details, selected courses, available sections, advisor views, or registrar updates. Course IDs, section IDs, course credits, seat availability, and relationship IDs remain numeric operational values because the database and transaction logic must use them for joins, credit calculations, schedule checks, and seat updates.
+
+The flow is:
+
+1. A registrar submits course or section information.
+2. The registrar model calls `encryptCourseFields()` or `encryptSectionFields()`.
+3. RSA ciphertext is stored in the corresponding `*_encrypted` columns.
+4. Student and advisor models call the matching decryption helpers before building API responses.
+5. The frontend receives normal course names and schedules and never sees database ciphertext.
+
+This protects the descriptive course data at rest while preserving the numeric values required for registration transactions.
+
+### Profile and Account Menu
+
+Registration accepts optional address and phone values. These values are encrypted with RSA before being written to `address_encrypted` and `phone_encrypted` in the `user` table. Existing profile fields are never returned as database ciphertext.
+
+Authenticated users can use:
+
+- `GET /auth/profile` to view the decrypted profile.
+- `PUT /auth/profile` to update name, email, address, and phone.
+
+The frontend account control is a three-dot menu. It provides:
+
+- **View profile:** read-only display of name, email, address, and phone.
+- **Edit profile:** editable fields with save and cancel controls.
+- **Log out:** removes the local session token and user data.
+
+The profile view intentionally contains no edit control; editing is available only through the separate menu option.
+
 ### Student Problem Reports
 
 Problem reports use the project's `crypto101` RSA service. The student sends the problem text to the backend, where it is encrypted with the registrar's RSA public key before being stored in `report.encrypted_problem`. The registrar retrieves the report and the backend decrypts it with the registrar's private key. The private key is kept outside the database and is used only by the backend decryption flow.
@@ -241,7 +280,7 @@ This means the student can choose any advisor returned by `GET /chat/advisors`, 
 
 #### 3. Message confidentiality and integrity
 
-Before a message is stored, the backend recovers the participant's AES session key and encrypts the trimmed message with AES-256-GCM. Every message receives a fresh random 12-byte IV and a GCM authentication tag. The database stores only the ciphertext, IV, and tag in `chat_message`.
+Before a message is stored, the backend recovers the participant's AES session key and encrypts the trimmed message with AES-256-GCM. Every message receives a fresh random 12-byte IV and a GCM authentication tag. The backend also calculates an HMAC-SHA256 MAC over the session ID, sender role, sender ID, ciphertext, IV, and GCM tag. The database stores only protected message data in `chat_message`.
 
 ```javascript
 const iv = crypto.randomBytes(12);
@@ -253,7 +292,7 @@ const ciphertext = Buffer.concat([
 const authTag = cipher.getAuthTag();
 ```
 
-During retrieval, the backend unwraps the session key, verifies the GCM authentication tag, and decrypts each message. If the ciphertext, IV, or tag was changed, decryption fails and the modified message is not returned as trusted text.
+During retrieval, the backend unwraps the session key, verifies the HMAC with a timing-safe comparison, then verifies the GCM authentication tag and decrypts each message. If the ciphertext, sender metadata, IV, MAC, or tag was changed, the message is rejected or decryption fails and the modified message is not returned as trusted text.
 
 #### 4. Authorization and participant access
 
@@ -273,7 +312,7 @@ chat_session
 
 chat_message
 	session_id, sender_role, sender_id
-	ciphertext, iv, auth_tag, created_at
+	ciphertext, iv, auth_tag, mac, created_at
 ```
 
 The current implementation stores ECC key material in the application database so the backend can perform the unwrap operation. Production deployments should protect database access and consider moving private key storage to a dedicated key-management service. MySQL inspection can confirm the presence of protected fields, but it cannot decrypt chat messages without the backend keys and crypto services.
@@ -298,7 +337,7 @@ DESCRIBE user_ecc_key;
 
 SELECT user_id, CHAR_LENGTH(public_key_x) AS public_x_length,
 			 CHAR_LENGTH(public_key_y) AS public_y_length,
-			 CHAR_LENGTH(private_key) AS private_key_length,
+				 CHAR_LENGTH(private_key_encrypted) AS encrypted_private_key_length,
 			 created_at
 FROM user_ecc_key;
 
@@ -321,6 +360,7 @@ SELECT
 	CHAR_LENGTH(ciphertext) AS ciphertext_length,
 	CHAR_LENGTH(iv) AS iv_length,
 	CHAR_LENGTH(auth_tag) AS auth_tag_length,
+	CHAR_LENGTH(mac) AS mac_length,
 	created_at
 FROM chat_message
 ORDER BY created_at DESC;
@@ -334,7 +374,7 @@ Do not run `SELECT totp_secret`, `SELECT private_key_encrypted`, `SELECT ciphert
 
 | Method | Endpoint | Params / Body                  |
 | ------ | -------- | ------------------------------ |
-| POST   | /auth/signup | name, email, password, role |
+| POST   | /auth/signup | name, email, password, role, address, phone |
 | POST   | /auth/login  | email, password, role       |
 | POST   | /auth/setup-totp | preAuthToken              |
 | POST   | /auth/verify-totp | preAuthToken, code       |

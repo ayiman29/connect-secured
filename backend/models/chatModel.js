@@ -97,11 +97,11 @@ export async function createSession(studentId, advisorId, studentEncryptedKey, a
 /**
  * Insert an AES-encrypted chat message
  */
-export async function saveMessage(sessionId, senderRole, senderId, ciphertext, iv, authTag) {
+export async function saveMessage(sessionId, senderRole, senderId, ciphertext, iv, authTag, mac) {
   const [result] = await pool.query(
-    `INSERT INTO chat_message (session_id, sender_role, sender_id, ciphertext, iv, auth_tag, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-    [sessionId, senderRole, senderId, ciphertext, iv, authTag]
+    `INSERT INTO chat_message (session_id, sender_role, sender_id, ciphertext, iv, auth_tag, mac, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+    [sessionId, senderRole, senderId, ciphertext, iv, authTag, mac]
   );
 
   return {
@@ -118,7 +118,7 @@ export async function saveMessage(sessionId, senderRole, senderId, ciphertext, i
  */
 export async function getMessagesBySessionId(sessionId) {
   const [rows] = await pool.query(
-    `SELECT message_id, session_id, sender_role, sender_id, ciphertext, iv, auth_tag, created_at
+    `SELECT message_id, session_id, sender_role, sender_id, ciphertext, iv, auth_tag, mac, created_at
      FROM chat_message
      WHERE session_id = ?
      ORDER BY created_at ASC`,

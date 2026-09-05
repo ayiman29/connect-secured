@@ -5,6 +5,8 @@ import {
   decryptSessionKey,
   encryptMessage,
   decryptMessage,
+  createChatMac,
+  verifyChatMac,
 } from '../lib/security/chatCryptoService.js';
 import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
 
@@ -177,6 +179,10 @@ export async function getMessages(req, res) {
 
     for (const m of rawMessages) {
       try {
+        if (m.mac && !verifyChatMac(m.mac, sessionId, m.sender_role, m.sender_id, m.ciphertext, m.iv, m.auth_tag, aesKeyHex)) {
+          console.error('Rejected chat message with invalid MAC:', m.message_id);
+          continue;
+        }
         const text = decryptMessage(m.ciphertext, m.iv, m.auth_tag, aesKeyHex);
         messages.push({
           message_id: m.message_id,
@@ -240,6 +246,7 @@ export async function sendMessage(req, res) {
 
     // Encrypt message text using AES-256-GCM
     const { ciphertext, iv, authTag } = encryptMessage(String(text).trim(), aesKeyHex);
+    const mac = createChatMac(sessionId, userRole, senderId, ciphertext, iv, authTag, aesKeyHex);
 
     const saved = await chatModel.saveMessage(
       sessionId,
@@ -247,7 +254,8 @@ export async function sendMessage(req, res) {
       senderId,
       ciphertext,
       iv,
-      authTag
+      authTag,
+      mac
     );
 
     return res.status(201).json({

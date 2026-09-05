@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS `chat_message` (
   `ciphertext` TEXT NOT NULL,
   `iv` VARCHAR(64) NOT NULL,
   `auth_tag` VARCHAR(64) NOT NULL,
+  `mac` VARCHAR(64) NOT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT `fk_chat_session` FOREIGN KEY (`session_id`) REFERENCES `chat_session` (`session_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

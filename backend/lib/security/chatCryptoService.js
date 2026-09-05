@@ -117,3 +117,30 @@ export function decryptMessage(ciphertextHex, ivHex, authTagHex, aesKeyHex) {
   const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   return decrypted.toString('utf8');
 }
+
+function getChatMacKey(aesKeyHex) {
+  return crypto
+    .createHmac('sha256', Buffer.from(aesKeyHex, 'hex'))
+    .update('connected-secured-chat-mac-v1', 'utf8')
+    .digest();
+}
+
+function getChatMacInput(sessionId, senderRole, senderId, ciphertext, iv, authTag) {
+  return JSON.stringify([String(sessionId), senderRole, String(senderId), ciphertext, iv, authTag]);
+}
+
+export function createChatMac(sessionId, senderRole, senderId, ciphertext, iv, authTag, aesKeyHex) {
+  return crypto
+    .createHmac('sha256', getChatMacKey(aesKeyHex))
+    .update(getChatMacInput(sessionId, senderRole, senderId, ciphertext, iv, authTag), 'utf8')
+    .digest('hex');
+}
+
+export function verifyChatMac(mac, sessionId, senderRole, senderId, ciphertext, iv, authTag, aesKeyHex) {
+  if (!mac) return false;
+  const expected = createChatMac(sessionId, senderRole, senderId, ciphertext, iv, authTag, aesKeyHex);
+  const actualBuffer = Buffer.from(mac, 'hex');
+  const expectedBuffer = Buffer.from(expected, 'hex');
+  return actualBuffer.length === expectedBuffer.length
+    && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
