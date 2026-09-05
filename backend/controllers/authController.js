@@ -2,6 +2,7 @@ import {
   findUserByEmail,
   getUserById,
   getUserRole,
+  updateUserProfile,
   saveTotpSecret,
   enableTotp,
 } from '../models/userModel.js';
@@ -55,7 +56,7 @@ function decodePreAuthToken(token) {
 
 export async function signup(req, res) {
   try {
-    const { email, name, password, role, id } = req.body;
+    const { email, name, password, role, id, address = '', phone = '' } = req.body;
 
     if (!email || !name || !password || !role || !id) {
       return res.status(400).json({ message: 'All fields are required' });
@@ -68,11 +69,11 @@ export async function signup(req, res) {
 
     if (role === 'student') {
       const credit = req.body.credit || 0;
-      await createStudent(id, email, name, password, credit);
+      await createStudent(id, email, name, password, credit, address, phone);
     } else if (role === 'advisor') {
-      await createAdvisor(id, email, name, password);
+      await createAdvisor(id, email, name, password, address, phone);
     } else if (role === 'registrar') {
-      await createRegistrar(id, email, name, password);
+      await createRegistrar(id, email, name, password, address, phone);
     } else {
       return res.status(400).json({ message: 'Invalid role' });
     }
@@ -81,6 +82,49 @@ export async function signup(req, res) {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
+  }
+}
+
+export async function getProfile(req, res) {
+  try {
+    const user = await getUserById(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    return res.json({
+      user_id: user.user_id,
+      name: user.name,
+      email: user.email,
+      address: user.address || '',
+      phone: user.phone || '',
+      role: (await getUserRole(user.user_id))?.role,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Failed to load profile' });
+  }
+}
+
+export async function updateProfile(req, res) {
+  try {
+    const { name, email, address = '', phone = '' } = req.body;
+    if (!name?.trim() || !email?.trim()) {
+      return res.status(400).json({ message: 'Name and email are required' });
+    }
+
+    const existing = await findUserByEmail(email);
+    if (existing && existing.user_id !== req.user.userId) {
+      return res.status(409).json({ message: 'Email is already in use' });
+    }
+
+    await updateUserProfile(req.user.userId, {
+      name: name.trim(),
+      email: email.trim(),
+      address: address.trim(),
+      phone: phone.trim(),
+    });
+    return getProfile(req, res);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Failed to update profile' });
   }
 }
 

@@ -3,8 +3,8 @@ import { createUser } from './userModel.js';
 import { encryptCourseFields, encryptSectionFields } from '../lib/security/courseCryptoService.js';
 
 
-export async function createRegistrar(registrarId, email, name, password) {
-  const user = await createUser(email, name, password);
+export async function createRegistrar(registrarId, email, name, password, address, phone) {
+  const user = await createUser(email, name, password, address, phone);
 
   await pool.query(
     `INSERT INTO registrar (registrar_id, user_id) VALUES (?, ?)`,

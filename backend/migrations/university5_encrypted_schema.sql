@@ -16,6 +16,8 @@ CREATE TABLE `user` (
   `email_encrypted` text NOT NULL,
   `email_lookup` varchar(80) NOT NULL,
   `name_encrypted` text NOT NULL,
+  `address_encrypted` text NOT NULL,
+  `phone_encrypted` text NOT NULL,
   `password` varchar(255) NOT NULL,
   `pii_key_version` varchar(16) NOT NULL DEFAULT 'v1',
   PRIMARY KEY (`user_id`),

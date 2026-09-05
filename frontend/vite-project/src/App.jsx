@@ -3,6 +3,7 @@ import StudentView from "./StudentView";
 import AdvisorView from "./AdvisorView";
 import AuthView from "./AuthView";
 import RegistrarView from "./RegistrarView";
+import ProfileMenu from "./ProfileMenu";
 
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5050";
@@ -74,13 +75,12 @@ export default function App() {
 
   return (
     <>
-      {/* logout float */}
       {isAuthed && (
-        <div style={{ position: "fixed", top: 12, right: 12, zIndex: 50 }}>
-          <button className="btn btn-secondary" onClick={handleLogout}>
-            Log out
-          </button>
-        </div>
+        <ProfileMenu
+          user={user}
+          onUserUpdated={setUser}
+          onLogout={handleLogout}
+        />
       )}
 
       {view}

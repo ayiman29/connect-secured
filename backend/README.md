@@ -42,7 +42,7 @@ This section describes how the API protects user authentication data and user pe
 
 ### Encrypted User Information
 
-During registration, the user's normalized email address and name are encrypted before insertion into the `user` table. The database stores these values in `email_encrypted` and `name_encrypted`; plaintext email and name columns are removed by the migration process.
+During registration, the user's normalized email address and name are encrypted before insertion into the `user` table. The database stores these values in `email_encrypted` and `name_encrypted`.
 
 The current implementation uses the existing `crypto101` RSA bridge for server-only user PII and TOTP secrets. The server encrypts these values with a dedicated RSA public key and decrypts them with the matching RSA private key. RSA payloads are processed in 40-character chunks by the Python bridge.
 
@@ -138,7 +138,7 @@ The server RSA key pair is generated through `crypto101` and saved to `config/se
 await ensureServerKeys();
 ```
 
-The old `ENCRYPTION_KEY` is required only while migrating legacy AES-encrypted rows. After all PII and TOTP values have been converted, it can be removed from the runtime environment. `EMAIL_LOOKUP_KEY` must remain because email lookup continues to use HMAC-SHA256.
+`EMAIL_LOOKUP_KEY` must remain because email lookup continues to use HMAC-SHA256. Legacy conversion utilities are separate from the normal runtime flow.
 
 ### Key Management and ECC Private-Key Protection
 
@@ -154,14 +154,7 @@ The key files are local educational-project storage. In production, replace this
 
 Chat ECC private keys are no longer stored as plaintext in `user_ecc_key.private_key`. They are encrypted with the managed server RSA key and stored as `private_key_encrypted`. The backend decrypts the ECC private scalar only in memory when it needs to unwrap a chat session key; it is never sent to the frontend.
 
-For an existing chat database, apply the column migration and then backfill the keys:
-
-```bash
-mysql -u <db_user> -p <database_name> < migrations/encrypt_ecc_private_keys.sql
-npm run migrate:ecc-keys
-```
-
-To rotate the server key, use the internal `rotateManagedKey()` operation from a controlled administrative script. The previous key is retained as `server_rsa_keys_<version>.json` until all ciphertext created with that version has been re-encrypted. Never delete a retired key before its data has been migrated and verified.
+To rotate the server key, use the internal `rotateManagedKey()` operation from a controlled administrative script. The previous key is retained as `server_rsa_keys_<version>.json` until all ciphertext created with that version has been re-encrypted. Never delete a retired key before its data has been verified.
 
 ### Student Problem Reports
 
@@ -232,49 +225,9 @@ FROM report;
 
 These SQL queries intentionally do not decrypt values. AES keys, HMAC keys, RSA keys, and the decryption logic remain outside MySQL. Use the authenticated API endpoints below to retrieve user-facing values or view a report through the backend.
 
-### Existing Data Migration
-
-For an existing database that still has plaintext `user.email` / `user.name` and email foreign keys:
-
-```bash
-npm run migrate:user-encryption
-```
-
-The migration script:
-
-1. Adds `user_id`, encrypted columns, and lookup columns.
-2. Backfills role tables (`student`, `advisor`, `registrar`) from email foreign keys to `user_id` foreign keys.
-3. Encrypts existing user email and name values.
-4. Generates HMAC lookup values.
-5. Re-hashes any non-bcrypt passwords.
-6. Removes plaintext email/name columns and old email foreign keys.
-
-For a clean encrypted schema bootstrap, use [migrations/university5_encrypted_schema.sql](migrations/university5_encrypted_schema.sql).
-
-If the database was created before 2FA was added, apply the TOTP migration once:
-
-```bash
-mysql -u <db_user> -p <database_name> < migrations/add_totp_to_user.sql
-```
-
-To encrypt existing course and section descriptive fields with RSA, first add the encrypted columns and then backfill them:
-
-```bash
-mysql -u <db_user> -p <database_name> < migrations/encrypt_course_data.sql
-npm run migrate:course-rsa
-```
-
-The migration converts course title, course name, exam schedule, section schedule, and faculty, then removes their old plaintext columns. Internal IDs, course credits, and seat counters remain numeric because the backend must use them for joins, credit limits, availability checks, and transactions.
-
 ### Encrypted Student-Advisor Chat
 
-Apply the chat migration after the main university schema has been created:
-
-```bash
-mysql -u <db_user> -p <database_name> < migrations/chat_schema.sql
-```
-
-The migration creates `user_ecc_key`, `chat_session`, and `chat_message`. Chat uses a hybrid design so that ECC protects the session key and AES-GCM protects message content:
+Chat uses a hybrid design so that ECC protects the session key and AES-GCM protects message content:
 
 #### 1. Participant key pairs
 
@@ -373,7 +326,7 @@ FROM chat_message
 ORDER BY created_at DESC;
 ```
 
-Do not run `SELECT totp_secret`, `SELECT private_key`, `SELECT ciphertext`, or the wrapped session-key columns when demonstrating the system. Those values are protected backend data, not user-facing output. Use the authenticated API and the crypto services for enrollment, message delivery, authentication-tag verification, and decryption.
+Do not run `SELECT totp_secret`, `SELECT private_key_encrypted`, `SELECT ciphertext`, or the wrapped session-key columns when demonstrating the system. Those values are protected backend data, not user-facing output. Use the authenticated API and the crypto services for enrollment, message delivery, authentication-tag verification, and decryption.
 
 ## API Endpoints
 
@@ -385,6 +338,8 @@ Do not run `SELECT totp_secret`, `SELECT private_key`, `SELECT ciphertext`, or t
 | POST   | /auth/login  | email, password, role       |
 | POST   | /auth/setup-totp | preAuthToken              |
 | POST   | /auth/verify-totp | preAuthToken, code       |
+| GET    | /auth/profile | - |
+| PUT    | /auth/profile | name, email, address, phone |
 
 ---
 
@@ -505,13 +460,7 @@ CREATE TABLE comment (
 );
 ```
 
-#### Setup and API
-
-Apply the comment migration after the main university schema has been created:
-
-```bash
-mysql -u <db_user> -p <database_name> < migrations/comment_schema.sql
-```
+#### API
 
 All endpoints require the full authenticated session token issued after 2FA:
 
@@ -550,9 +499,5 @@ Generate a separate 32-byte HMAC key for `EMAIL_LOOKUP_KEY`:
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-The server RSA key pair is generated automatically through `crypto101` on backend startup. To convert existing AES-encrypted PII and TOTP values to RSA, run the migration once:
-
-```bash
-npm run migrate:rsa-encryption
-```
+The server RSA key pair is generated automatically through `crypto101` on backend startup.
 

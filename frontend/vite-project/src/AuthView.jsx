@@ -417,6 +417,8 @@ function SignupForm({ onSwitch }) {
   const [fullName, setFullName] = useState("");
   const [userId, setUserId] = useState("");
   const [email, setEmail] = useState("");
+  const [address, setAddress] = useState("");
+  const [phone, setPhone] = useState("");
   const [accountType, setAccountType] = useState("student");
   const [credit, setCredit] = useState("");
   const [password, setPassword] = useState("");
@@ -441,6 +443,8 @@ function SignupForm({ onSwitch }) {
         email: email.trim(),
         role: accountType,
         password,
+        address: address.trim(),
+        phone: phone.trim(),
       };
       if (accountType === "student" && credit !== "") {
         payload.credit = Number(credit);
@@ -517,6 +521,32 @@ function SignupForm({ onSwitch }) {
           <option value="advisor">Advisor</option>
           <option value="registrar">Registrar</option>
         </select>
+
+        <label htmlFor="su-address" className="field__label">
+          Address (optional)
+        </label>
+        <input
+          id="su-address"
+          className="field__input"
+          type="text"
+          placeholder="Your address"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          autoComplete="street-address"
+        />
+
+        <label htmlFor="su-phone" className="field__label">
+          Phone number (optional)
+        </label>
+        <input
+          id="su-phone"
+          className="field__input"
+          type="tel"
+          placeholder="Your phone number"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          autoComplete="tel"
+        />
 
         {/* Credits (only for student) */}
         {accountType === "student" && (

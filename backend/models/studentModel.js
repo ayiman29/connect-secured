@@ -5,8 +5,8 @@ import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
 import { decryptCourseFields, decryptSectionFields } from '../lib/security/courseCryptoService.js';
 
 
-export async function createStudent(studentId, email, name, password, credit) {
-  const user = await createUser(email, name, password);
+export async function createStudent(studentId, email, name, password, credit, address, phone) {
+  const user = await createUser(email, name, password, address, phone);
 
   await pool.query(
     `INSERT INTO student (student_id, user_id, credit, status) VALUES (?, ?, ?, ?)`,

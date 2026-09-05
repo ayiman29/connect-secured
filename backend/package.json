@@ -8,7 +8,8 @@
     "migrate:user-encryption": "node scripts/migrateUserEncryption.js",
     "migrate:rsa-encryption": "node scripts/migrateToRsaEncryption.js",
     "migrate:course-rsa": "node scripts/migrateCourseDataToRsa.js",
-    "migrate:ecc-keys": "node scripts/migrateEccPrivateKeys.js"
+    "migrate:ecc-keys": "node scripts/migrateEccPrivateKeys.js",
+    "migrate:profile-fields": "node scripts/migrateProfileFields.js"
   },
   "keywords": [],
   "author": "",

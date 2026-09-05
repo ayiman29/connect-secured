@@ -6,8 +6,8 @@ import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
 import { decryptCourseFields, decryptSectionFields } from '../lib/security/courseCryptoService.js';
 
 
-export async function createAdvisor(advisorId, email, name, password) {
-  const user = await createUser(email, name, password);
+export async function createAdvisor(advisorId, email, name, password, address, phone) {
+  const user = await createUser(email, name, password, address, phone);
 
   await pool.query(
     `INSERT INTO advisor (advisor_id, user_id) VALUES (?, ?)`,
