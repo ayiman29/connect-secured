@@ -216,6 +216,16 @@ The migration script:
 
 For a clean encrypted schema bootstrap, use [migrations/university5_encrypted_schema.sql](migrations/university5_encrypted_schema.sql).
 
+### Chat Database Setup
+
+Apply the chat migration after the main university schema has been created:
+
+```bash
+mysql -u <db_user> -p <database_name> < migrations/chat_schema.sql
+```
+
+The migration creates `user_ecc_key`, `chat_session`, and `chat_message`. The backend generates each user's ECC key pair through `crypto101` when the user starts or joins a conversation. A shared AES session key is wrapped separately for the student and advisor with ECC, while each message is stored with AES-GCM ciphertext, an IV, and an authentication tag.
+
 ## API Endpoints
 
 ### Auth
@@ -275,6 +285,20 @@ For a clean encrypted schema bootstrap, use [migrations/university5_encrypted_sc
 | GET    | /registrars/reports                        | -                                                                |
 | POST   | /registrars/reports/:reportId/decrypt      | reportId                                                         |
 | DELETE | /registrars/reports/:reportId              | reportId                                                         |
+
+---
+
+### Chat
+
+Chat routes require authentication. Students chat with the configured advisor; advisors provide the selected `studentId` when opening a conversation.
+
+| Method | Endpoint                         | Params / Body             |
+| ------ | -------------------------------- | ------------------------- |
+| GET    | /chat/session                    | advisor: `studentId`      |
+| GET    | /chat/advisors                   | -                         |
+| GET    | /chat/messages/:sessionId       | sessionId                 |
+| POST   | /chat/send                      | sessionId, text           |
+| GET    | /chat/advisor/contacts          | -                         |
 
 
 

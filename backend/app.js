@@ -5,6 +5,7 @@ import studentRoutes from './routes/studentRoutes.js';
 import advisorRoutes from './routes/advisorRoutes.js';
 import registrarRoutes from './routes/registrarRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import chatRoutes from './routes/chatRoutes.js';
 import { validateSecurityConfiguration } from './lib/security/cryptoService.js';
 
 const app = express();
@@ -39,6 +40,7 @@ app.use('/students', studentRoutes);
 app.use('/advisors', advisorRoutes);
 app.use('/registrars', registrarRoutes);
 app.use('/auth', authRoutes);
+app.use('/chat', chatRoutes);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

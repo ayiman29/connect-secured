@@ -4,6 +4,7 @@ import SelectedSections from "./SelectedSections";
 import "./Panel.css";
 import "./AdvisorView.css";
 import "./Nav.css";
+import ChatWidget from "./ChatWidget";
 import bracuLogo from "./assets/bracu.png";
 import notifButton from "./assets/bell_icon.png";
 
@@ -638,6 +639,7 @@ export default function AdvisorView() {
       <CuteToast open={toastOpen} onClose={() => setToastOpen(false)}>
         {toastMsg}
       </CuteToast>
+      <ChatWidget role="advisor" studentId={studentId} />
     </div>
   );
 }

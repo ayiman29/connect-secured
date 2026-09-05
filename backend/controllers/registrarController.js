@@ -116,4 +116,4 @@ export async function deleteReport(req, res) {
     console.error('Error deleting report:', err);
     res.status(500).json({ error: err.message || 'Failed to delete report' });
   }
-}
+}
