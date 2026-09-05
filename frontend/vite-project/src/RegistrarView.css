@@ -1,0 +1,239 @@
+/* RegistrarView.css
+   Design split for RegistrarView.jsx
+   Uses Inter and a palette consistent with your app
+*/
+:root {font-family: Inter;
+}
+:root{
+    --bg: #FAFAFA;
+    --text: #0f172a;
+    --muted: #475569;
+    --border: #e2e8f0;
+  
+    --card-bg: #fff;
+    --card-shadow: 0 1px 2px rgba(0,0,0,.04);
+  
+    --blue: #9AD4FF;
+    --blue-border: #4ea4f7;
+    --blue-hover: #7FC3FF;
+    --blue-active: #74BAFF;
+  
+    --danger-bg: #fee2e2;
+    --danger-text: #991b1b;
+    --danger-border: #ef4444;
+  
+    --radius: 12px;
+    --radius-sm: 8px;
+  
+    --input-h: 38px;
+    --btn-h: 38px;
+    --shadow-press: 0 10px 20px rgba(90,160,255,.24);
+  }
+  
+  *,
+  *::before,
+  *::after { box-sizing: border-box; }
+  
+  .registrar{
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    padding: 24px;
+  }
+  
+  .registrar__h1{
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 16px;
+  }
+  
+  /* Flash messages */
+  .flash{
+    border: 1px solid;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+  .flash--ok{
+    background: #e8fff1;
+    border-color: #57c985;
+    color: #1b6b3d;
+  }
+  .flash--err{
+    background: #ffecec;
+    border-color: #f27a7a;
+    color: #8a1f1f;
+  }
+  
+  /* Grid */
+  .registrar__grid{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  
+  @media (max-width: 960px){
+    .registrar__grid{ grid-template-columns: 1fr; }
+  }
+  
+  /* Cards */
+  .card{
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--card-shadow);
+    padding: 16px;
+  }
+  .card__title{
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0 0 12px;
+  }
+  .card__subtitle{
+    font-size: 16px;
+    font-weight: 500;
+    margin: 0 0 8px;
+  }
+  .bold{ font-weight: 600; }
+  
+  /* Forms */
+  .form{ width: 100%; }
+  .row{
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .row--2{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 720px){
+    .row--2{ grid-template-columns: 1fr; }
+  }
+  .row--right{
+    /* display: flex; */
+    gap: 8px;
+    width: 255px;
+    margin-left: 200px;
+
+  }
+  
+  .field{ margin-bottom: 12px; min-width: 0; width: 100%; }
+  .label{
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .input{
+    width: 100%;
+    height: var(--input-h);
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    outline: none;
+    background: #fff;
+    font-size: 14px;
+    color: var(--text);
+  }
+  
+  /* Hints */
+  .hint{ color: #94a3b8; font-weight: 400; font-size: 11px; }
+  
+  /* Buttons */
+  .btn{
+    height: var(--btn-h);
+    padding: 0 14px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    background: #fff;
+  }
+  .btn--primary{
+    border-color: var(--blue-border);
+    background: var(--blue);
+    color: #fff;
+  }
+  .btn--primary:hover{ background: var(--blue-hover); }
+  .btn--primary:active{
+    background: var(--blue-active);
+    box-shadow: var(--shadow-press);
+    transform: translateY(1px);
+  }
+  
+  .btn--danger{
+    border-color: var(--danger-border);
+    background: var(--danger-bg);
+    color: var(--danger-text);
+  }
+  .btn--ghost{
+    border: 1px solid var(--border);
+    background: #fff;
+  }
+  .ml-8{ margin-left: 8px; }
+  
+  /* Divider */
+  .divider{
+    height: 1px;
+    background: var(--border);
+    margin: 16px 0;
+  }
+  .divider--lg{ margin: 20px 0; }
+  
+  /* Tables */
+  .table-wrap{ overflow-x: auto; }
+  
+  .tbl{
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 14px;
+  }
+  .tbl thead th{
+    text-align: left;
+    padding: 10px 12px;
+    color: #334155;
+    border-bottom: 1px solid var(--border);
+    background: #f8fafc;
+    position: sticky;
+    top: 0;
+  }
+  .tbl tbody td{
+    padding: 10px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    vertical-align: top;
+  }
+  .tbl__empty{
+    padding: 18px;
+    color: #64748b;
+    text-align: center;
+  }
+  /* Ensure button text is visible and not full-width in tables */
+.btn { color: var(--text); }                 /* force readable color */
+.tbl .btn {
+  width: auto !important;                   /* override any global button{width:100%} */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px !important;               /* in case a reset zeros it */
+  padding: 6px 10px;
+}
+
+/* Small pill variant used in the table */
+.btn--sm {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+}
+
+/* Optional: a subtle hover state for ghost buttons */
+.btn--ghost { color: var(--text); }
+.btn--ghost:hover {
+  background: #f8fafc;
+  border-color: var(--border);
+}
