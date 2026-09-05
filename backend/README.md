@@ -36,28 +36,97 @@ Set up MySQL database and configure `.env` values.
 npm run dev
 ```
 
-## Security: Encryption At Rest
+## CRYPTOGRAPHY
 
-This API encrypts user PII in the `user` table before saving to MySQL and decrypts it before sending API responses.
+This section describes how the API protects user authentication data and user personally identifiable information (PII). The implementation is application-layer encryption: values are encrypted before they are written to MySQL and decrypted only when the application needs to use or return them.
 
-- AES-256-GCM is used for encrypted fields (`email_encrypted`, `name_encrypted`)
-- Random 12-byte IV is generated per encryption call
-- GCM auth tag is stored with ciphertext for integrity/authentication
-- Passwords are not encrypted/decrypted and remain bcrypt hashes
-- Email search uses HMAC-SHA256 lookup (`email_lookup`) with a separate key
-- JWT signing key and encryption/HMAC keys are separate secrets
+### Encrypted User Information
 
-Required environment variables:
+During registration, the user's normalized email address and name are encrypted before insertion into the `user` table. The database stores these values in `email_encrypted` and `name_encrypted`; plaintext email and name columns are removed by the migration process.
 
-- `JWT_SECRET`
-- `ENCRYPTION_KEY` (64 hex chars, 32 bytes)
-- `EMAIL_LOOKUP_KEY` (64 hex chars, 32 bytes)
+The current implementation uses **AES-256-GCM**. AES-GCM provides confidentiality and authenticated encryption. A fresh random 12-byte initialization vector (IV) is generated for every value, so encrypting the same value twice produces different ciphertext.
 
-Optional key-version variables for rotation:
+```javascript
+const iv = crypto.randomBytes(IV_LENGTH);
+const key = getEncryptionKeyByVersion(ENCRYPTION_KEY_VERSION);
+const cipher = crypto.createCipheriv('aes-256-gcm', key, iv, {
+	authTagLength: 16,
+});
 
-- `ENCRYPTION_KEY_VERSION` (default `v1`)
-- `EMAIL_LOOKUP_KEY_VERSION` (default `v1`)
-- `ENCRYPTION_KEY_<VERSION>` and `EMAIL_LOOKUP_KEY_<VERSION>` for decrypting legacy data
+const encrypted = Buffer.concat([
+	cipher.update(String(plainText), 'utf8'),
+	cipher.final(),
+]);
+const authTag = cipher.getAuthTag();
+```
+
+The stored encrypted value contains the key version, IV, authentication tag, and ciphertext:
+
+```text
+version:iv:authentication_tag:ciphertext
+```
+
+When the value is retrieved, the application selects the key using the stored version, sets the authentication tag, and decrypts the ciphertext. If the ciphertext or tag has been modified, decryption fails instead of returning untrusted plaintext.
+
+```javascript
+const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv, {
+	authTagLength: 16,
+});
+decipher.setAuthTag(authTag);
+
+const decrypted = Buffer.concat([
+	decipher.update(ciphertext),
+	decipher.final(),
+]);
+```
+
+### Password Protection
+
+Passwords are not encrypted because passwords should not be recoverable. They are hashed with bcrypt, which generates and stores a salt as part of the resulting hash. During login, bcrypt compares the submitted password with the stored hash.
+
+```javascript
+const hashedPassword = await bcrypt.hash(password, 10);
+const passwordMatches = await bcrypt.compare(password, user.password);
+```
+
+### Integrity Protection
+
+AES-GCM generates an authentication tag for each encrypted value. The tag detects unauthorized changes to the IV, ciphertext, or authenticated encryption data. Any failed verification causes decryption to throw an error.
+
+The API also uses **HMAC-SHA256** with a separate secret key to create a deterministic, protected lookup value for email addresses. This allows the application to find a user without storing a plaintext email or using the encrypted email value as a database lookup key.
+
+```javascript
+const digest = crypto
+	.createHmac('sha256', lookupKey)
+	.update(normalizedEmail, 'utf8')
+	.digest('hex');
+
+const emailLookup = `${LOOKUP_KEY_VERSION}:${digest}`;
+```
+
+The HMAC key is separate from the AES encryption key. A database user who does not have the application secrets cannot create valid lookup values or valid encrypted payloads.
+
+### Key Configuration and Versions
+
+The application loads cryptographic secrets from environment variables rather than storing them in the database:
+
+- `ENCRYPTION_KEY`: 32-byte AES key encoded as 64 hexadecimal characters.
+- `EMAIL_LOOKUP_KEY`: separate 32-byte HMAC key encoded as 64 hexadecimal characters.
+- `ENCRYPTION_KEY_VERSION`: active encryption key version, default `v1`.
+- `EMAIL_LOOKUP_KEY_VERSION`: active lookup key version, default `v1`.
+- `ENCRYPTION_KEY_<VERSION>` and `EMAIL_LOOKUP_KEY_<VERSION>`: optional older keys used to decrypt or validate data created under a previous version.
+- `JWT_SECRET`: separate secret used to sign authentication tokens.
+
+Key values are validated at application startup:
+
+```javascript
+export function validateSecurityConfiguration() {
+	parseHexKey(process.env.ENCRYPTION_KEY, 'ENCRYPTION_KEY');
+	parseHexKey(process.env.EMAIL_LOOKUP_KEY, 'EMAIL_LOOKUP_KEY');
+}
+```
+
+Key-version support allows a controlled migration to a new key: configure the new active version while retaining the previous version for reading existing data, then re-encrypt existing records and retire the old key according to the deployment's key-management policy. The current application does not provide a dedicated key vault or automatic key-generation service, so production secrets should be supplied by a secure secret-management system.
 
 ### Existing Data Migration
 
@@ -70,8 +139,8 @@ npm run migrate:user-encryption
 The migration script:
 
 1. Adds `user_id`, encrypted columns, and lookup columns.
-2. Backfills role tables (`student`, `advisor`, `registrar`) from email FK to `user_id` FK.
-3. Encrypts existing user email/name values.
+2. Backfills role tables (`student`, `advisor`, `registrar`) from email foreign keys to `user_id` foreign keys.
+3. Encrypts existing user email and name values.
 4. Generates HMAC lookup values.
 5. Re-hashes any non-bcrypt passwords.
 6. Removes plaintext email/name columns and old email foreign keys.
