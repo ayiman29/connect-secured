@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""
+Bridge script connecting Node.js backend with the user's custom crypto101 library.
+Directly imports:
+- rsa.py from crypto101
+- utils.py from crypto101
+"""
+import sys
+import os
+import json
+
+# Locate crypto101 directory
+crypto101_dir = os.environ.get("CRYPTO101_PATH")
+if not crypto101_dir or not os.path.exists(crypto101_dir):
+    default_dir = r"c:\Users\ayima\PROJECTS\crypto101"
+    if os.path.exists(default_dir):
+        crypto101_dir = default_dir
+    else:
+        # Fallback to sibling directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        sibling_dir = os.path.abspath(os.path.join(script_dir, "..", "..", "..", "crypto101"))
+        if os.path.exists(sibling_dir):
+            crypto101_dir = sibling_dir
+
+if not crypto101_dir or not os.path.exists(crypto101_dir):
+    sys.stderr.write(f"Error: crypto101 directory not found at {crypto101_dir}\n")
+    sys.exit(1)
+
+if crypto101_dir not in sys.path:
+    sys.path.insert(0, crypto101_dir)
+
+try:
+    import rsa
+    import utils
+except ImportError as e:
+    sys.stderr.write(f"Error importing crypto101 modules: {e}\n")
+    sys.exit(1)
+
+CHUNK_SIZE = 40  # characters per chunk to guarantee message integer < modulus n
+
+def do_generate_keys(bit_length=512):
+    pub, priv = rsa.generate_keypair(bit_length)
+    return {
+        "publicKey": {
+            "e": str(pub[0]),
+            "n": str(pub[1])
+        },
+        "privateKey": {
+            "d": str(priv[0]),
+            "n": str(priv[1])
+        }
+    }
+
+def do_encrypt(text, public_key):
+    e = int(public_key["e"])
+    n = int(public_key["n"])
+    pub = (e, n)
+
+    if not text:
+        return {"ciphertext": ""}
+
+    chunks = [text[i:i + CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
+    ciphers = []
+    for chunk in chunks:
+        m = utils.text_to_int(chunk)
+        c = rsa.encrypt(m, pub)
+        ciphers.append(str(c))
+
+    return {"ciphertext": ":".join(ciphers)}
+
+def do_decrypt(ciphertext, private_key):
+    d = int(private_key["d"])
+    n = int(private_key["n"])
+    priv = (d, n)
+
+    if not ciphertext or not ciphertext.strip():
+        return {"plaintext": ""}
+
+    parts = [p.strip() for p in ciphertext.split(":") if p.strip()]
+    recovered_chunks = []
+    for p in parts:
+        c = int(p)
+        m = rsa.decrypt(c, priv)
+        chunk = utils.int_to_text(m)
+        recovered_chunks.append(chunk)
+
+    return {"plaintext": "".join(recovered_chunks)}
+
+def main():
+    if len(sys.argv) < 2:
+        sys.stderr.write("Usage: crypto101_bridge.py <generate-keys|encrypt|decrypt> [args...]\n")
+        sys.exit(1)
+
+    command = sys.argv[1].lower()
+
+    if command == "generate-keys":
+        bits = int(sys.argv[2]) if len(sys.argv) > 2 else 512
+        res = do_generate_keys(bits)
+        print(json.dumps(res))
+    elif command in ("encrypt", "decrypt"):
+        raw_input = sys.stdin.read()
+        if not raw_input.strip():
+            sys.stderr.write("Error: Expected JSON input on stdin\n")
+            sys.exit(1)
+        data = json.loads(raw_input)
+        if command == "encrypt":
+            res = do_encrypt(data["text"], data["publicKey"])
+        else:
+            res = do_decrypt(data["ciphertext"], data["privateKey"])
+        print(json.dumps(res))
+    else:
+        sys.stderr.write(f"Unknown command: {command}\n")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+

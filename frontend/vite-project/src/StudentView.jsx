@@ -242,9 +242,44 @@ export default function StudentView() {
 
   const [initialCompletedCredit, setInitialCompletedCredit] = useState(null); // ← persisted, shown as Completed Credit
 
+  const [problemText, setProblemText] = useState("");
+  const [submittingReport, setSubmittingReport] = useState(false);
+  const [showReportForm, setShowReportForm] = useState(false);
+
   const [toastOpen, setToastOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState("");
   const showToast = useCallback((msg) => { setToastMsg(msg); setToastOpen(true); }, []);
+
+  const handleReportProblem = async (e) => {
+    e?.preventDefault?.();
+    if (!problemText.trim()) {
+      showToast("Please describe your problem before submitting.");
+      return;
+    }
+    if (!studentId) {
+      showToast("Missing studentId.");
+      return;
+    }
+    setSubmittingReport(true);
+    try {
+      const res = await fetch("/students/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId: Number(studentId), problemText: problemText.trim() }),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => res.statusText);
+        throw new Error(errText || "Failed to submit report.");
+      }
+      setProblemText("");
+      setShowReportForm(false);
+      showToast("Problem reported to registrar successfully.");
+    } catch (err) {
+      showToast(err.message || "Failed to submit report.");
+    } finally {
+      setSubmittingReport(false);
+    }
+  };
 
   /* resolve student id */
   useEffect(() => {
@@ -542,6 +577,74 @@ export default function StudentView() {
             )}
           </div>
 
+        </div>
+
+        <div className="advising-header-box" style={{ marginTop: "1rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 600, color: "#111827" }}>
+                Report a Problem to Registrar
+              </h3>
+              <p style={{ margin: "4px 0 0", fontSize: "14px", color: "#6b7280" }}>
+                Facing an issue with registration, courses, or scheduling? Submit a problem report directly to the Registrar.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowReportForm((v) => !v)}
+              style={{ padding: "8px 16px", fontSize: "14px", whiteSpace: "nowrap" }}
+            >
+              {showReportForm ? "Close Form" : "Report a Problem"}
+            </button>
+          </div>
+
+          {showReportForm && (
+            <form onSubmit={handleReportProblem} style={{ marginTop: "1rem", borderTop: "1px solid #e5e7eb", paddingTop: "1rem" }}>
+              <label style={{ display: "block", fontSize: "14px", fontWeight: 500, color: "#374151", marginBottom: "6px" }}>
+                Describe your problem:
+              </label>
+              <textarea
+                style={{
+                  width: "100%",
+                  minHeight: "100px",
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid #d1d5db",
+                  fontSize: "14px",
+                  resize: "vertical",
+                  boxSizing: "border-box",
+                  fontFamily: "inherit",
+                }}
+                placeholder="Enter details of the issue you are facing..."
+                value={problemText}
+                onChange={(e) => setProblemText(e.target.value)}
+                disabled={submittingReport}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "10px", gap: "8px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setShowReportForm(false);
+                    setProblemText("");
+                  }}
+                  disabled={submittingReport}
+                  style={{ padding: "8px 16px" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-confirm"
+                  disabled={submittingReport || !problemText.trim()}
+                  style={{ padding: "8px 20px" }}
+                >
+                  {submittingReport ? "Submitting..." : "Submit Report"}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
 

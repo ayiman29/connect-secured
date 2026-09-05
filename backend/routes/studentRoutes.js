@@ -9,6 +9,7 @@ import {
   getStudentInfo,
   confirmAdvising,
   getStudentIdFromEmail,
+  submitProblemReport,
 } from '../controllers/studentController.js';
 
 const router = express.Router();
@@ -24,5 +25,6 @@ router.get('/my-courses/:studentId', getMyCourses);
 router.get('/info/:studentId', getStudentInfo);
 router.put('/confirm-advising/:studentId', confirmAdvising);
 router.get('/id-by-email/:email', getStudentIdFromEmail);
+router.post('/report', submitProblemReport);
 
 export default router;

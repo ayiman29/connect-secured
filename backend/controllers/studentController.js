@@ -1,4 +1,6 @@
 import * as studentModel from '../models/studentModel.js';
+import * as reportModel from '../models/reportModel.js';
+import { encryptProblemReport } from '../lib/security/crypto101RsaService.js';
 
 export async function getAllCourses(req, res) {
   try {
@@ -128,6 +130,38 @@ export async function confirmAdvising(req, res) {
     res.status(200).json({ message: 'Advising status updated to waiting.' });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+}
+
+export async function submitProblemReport(req, res) {
+  try {
+    const { problemText } = req.body;
+    let studentId = req.body.studentId;
+
+    if (!problemText || !String(problemText).trim()) {
+      return res.status(400).json({ error: 'Problem description cannot be empty.' });
+    }
+
+    if (!studentId && req.user?.email) {
+      const studentRow = await studentModel.getStudentIdByEmail(req.user.email);
+      studentId = studentRow?.student_id;
+    }
+
+    if (!studentId) {
+      return res.status(400).json({ error: 'Valid studentId is required.' });
+    }
+
+    // Encrypt problem with Registrar RSA public key using crypto101
+    const encryptedProblem = await encryptProblemReport(String(problemText).trim());
+
+    const result = await reportModel.createReport(Number(studentId), encryptedProblem);
+    return res.status(201).json({
+      message: 'Report submitted successfully.',
+      report_id: result.report_id,
+    });
+  } catch (err) {
+    console.error('Error submitting problem report:', err);
+    return res.status(500).json({ error: err.message || 'Failed to submit problem report.' });
   }
 }
 

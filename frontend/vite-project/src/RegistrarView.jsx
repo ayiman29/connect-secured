@@ -87,9 +87,30 @@ export default function RegistrarView() {
   const [sDays, setSDays]   = useState("");
   const [sTime, setSTime]   = useState("");
 
+  /* ===== Reports state ===== */
+  const [reports, setReports] = useState([]);
+  const [loadingReports, setLoadingReports] = useState(false);
+  const [decryptedReports, setDecryptedReports] = useState({});
+  const [decryptingId, setDecryptingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+
+  const fetchReports = async () => {
+    setLoadingReports(true);
+    try {
+      const data = await authRequest("/registrars/reports");
+      setReports(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Failed to load reports:", e);
+    } finally {
+      setLoadingReports(false);
+    }
+  };
+
   useEffect(() => {
     if (!localStorage.getItem("token")) {
       setMsg({ type: "err", text: "No token found. Please log in first." });
+    } else {
+      fetchReports();
     }
   }, []);
 
@@ -98,6 +119,43 @@ export default function RegistrarView() {
     if (sDays && sTime) setSSchedule(`${sDays} ${sTime}`);
     else setSSchedule("");
   }, [sDays, sTime]);
+
+  const handleDecryptReport = async (reportId) => {
+    setDecryptingId(reportId);
+    try {
+      const res = await authRequest(`/registrars/reports/${encodeURIComponent(reportId)}/decrypt`, {
+        method: "POST",
+      });
+      setDecryptedReports((prev) => ({
+        ...prev,
+        [reportId]: res.decryptedProblem,
+      }));
+    } catch (e) {
+      setMsg({ type: "err", text: e.message || "Failed to decrypt report." });
+    } finally {
+      setDecryptingId(null);
+    }
+  };
+
+  const handleMarkAsDone = async (reportId) => {
+    setDeletingId(reportId);
+    try {
+      await authRequest(`/registrars/reports/${encodeURIComponent(reportId)}`, {
+        method: "DELETE",
+      });
+      setReports((prev) => prev.filter((r) => r.report_id !== reportId));
+      setDecryptedReports((prev) => {
+        const next = { ...prev };
+        delete next[reportId];
+        return next;
+      });
+      setMsg({ type: "ok", text: "Issue marked as done." });
+    } catch (e) {
+      setMsg({ type: "err", text: e.message || "Failed to mark report as done." });
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const flash = async (fn, okText = "Saved successfully.") => {
     setMsg(null);
@@ -439,6 +497,92 @@ export default function RegistrarView() {
                 </button>
               </div>
             </form>
+          </section>
+
+          {/* ===== Student Problem Reports ===== */}
+          <section className="card" style={{ gridColumn: "1 / -1", marginTop: "8px" }}>
+            <div className="reports-header">
+              <div>
+                <h2 className="card__title" style={{ margin: 0 }}>Student Problem Reports</h2>
+                <div className="reports-subtitle">Review and resolve issues submitted by students.</div>
+              </div>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={fetchReports}
+                disabled={loadingReports}
+                style={{ padding: "6px 14px", fontSize: "13px" }}
+              >
+                {loadingReports ? "Refreshing..." : "Refresh Reports"}
+              </button>
+            </div>
+
+            {loadingReports && reports.length === 0 ? (
+              <p style={{ color: "var(--muted)", fontStyle: "italic" }}>Loading submitted problem reports...</p>
+            ) : reports.length === 0 ? (
+              <div style={{ padding: "24px", textAlign: "center", background: "#f8fafc", borderRadius: "8px", border: "1px dashed var(--border)", color: "var(--muted)" }}>
+                No open student problem reports.
+              </div>
+            ) : (
+              <div className="reports-table-wrap">
+                <table className="reports-table">
+                  <thead>
+                    <tr>
+                      <th>Report</th>
+                      <th>Student</th>
+                      <th>Submitted</th>
+                      <th>Problem</th>
+                      <th className="reports-table__actions">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                {reports.map((r) => {
+                  const isDecrypted = decryptedReports[r.report_id] !== undefined;
+                  const isDecrypting = decryptingId === r.report_id;
+                  const isDeleting = deletingId === r.report_id;
+                  const formattedDate = r.created_at ? new Date(r.created_at).toLocaleString() : "-";
+
+                  return (
+                    <tr
+                      key={r.report_id}
+                    >
+                      <td>#{r.report_id}</td>
+                      <td>
+                        <strong>{r.student_name}</strong>
+                        <span className="reports-table__secondary">ID: {r.student_id}</span>
+                      </td>
+                      <td>{formattedDate}</td>
+                      <td className="reports-table__problem">
+                        {isDecrypted ? (
+                          <div className="reports-table__message">{decryptedReports[r.report_id]}</div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => handleDecryptReport(r.report_id)}
+                            disabled={isDecrypting}
+                          >
+                            {isDecrypting ? "Opening..." : "View report"}
+                          </button>
+                        )}
+                      </td>
+                      <td className="reports-table__actions">
+                        <button
+                          type="button"
+                          className="btn btn--danger btn--sm"
+                          onClick={() => handleMarkAsDone(r.report_id)}
+                          disabled={isDeleting}
+                        >
+                          {isDeleting ? "Saving..." : "Mark as Done"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
         </div>
       </div>

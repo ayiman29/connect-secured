@@ -237,3 +237,92 @@
   background: #f8fafc;
   border-color: var(--border);
 }
+
+  .reports-header{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .reports-subtitle{
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 4px;
+  }
+
+  .reports-table-wrap{
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .reports-table{
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+    font-size: 14px;
+    background: #fff;
+  }
+
+  .reports-table th{
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+    background: #f8fafc;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .reports-table td{
+    padding: 13px 14px;
+    border-bottom: 1px solid #f1f5f9;
+    color: var(--text);
+    vertical-align: top;
+  }
+
+  .reports-table tbody tr:last-child td{
+    border-bottom: 0;
+  }
+
+  .reports-table tbody tr:hover td{
+    background: #f8fafc;
+  }
+
+  .reports-table__secondary{
+    display: block;
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .reports-table__problem{
+    min-width: 260px;
+    max-width: 480px;
+  }
+
+  .reports-table__message{
+    max-height: 96px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    line-height: 1.45;
+  }
+
+  .reports-table__actions{
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 720px){
+    .reports-header{
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .reports-header .btn{
+      align-self: flex-start;
+    }
+  }

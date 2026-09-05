@@ -128,6 +128,75 @@ export function validateSecurityConfiguration() {
 
 Key-version support allows a controlled migration to a new key: configure the new active version while retaining the previous version for reading existing data, then re-encrypt existing records and retire the old key according to the deployment's key-management policy. The current application does not provide a dedicated key vault or automatic key-generation service, so production secrets should be supplied by a secure secret-management system.
 
+### Student Problem Reports
+
+Problem reports use the project's `crypto101` RSA service. The student sends the problem text to the backend, where it is encrypted with the registrar's RSA public key before being stored in `report.encrypted_problem`. The registrar retrieves the report and the backend decrypts it with the registrar's private key. The private key is kept outside the database and is used only by the backend decryption flow.
+
+```javascript
+// Student flow: encrypt before inserting into MySQL
+const encryptedProblem = await encryptProblemReport(problemText);
+await reportModel.createReport(studentId, encryptedProblem);
+
+// Registrar flow: decrypt after retrieving the ciphertext
+const decrypted = await decryptProblemReport(report.encrypted_problem);
+```
+
+The report table stores RSA ciphertext, not the student's plaintext problem:
+
+```sql
+CREATE TABLE `report` (
+	`report_id` INT NOT NULL AUTO_INCREMENT,
+	`student_id` INT NOT NULL,
+	`encrypted_problem` LONGTEXT NOT NULL,
+	`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	PRIMARY KEY (`report_id`)
+);
+```
+
+### SQL Inspection Commands
+
+These MySQL commands can be used to verify the protected data stored by the backend. Run them against the configured university database:
+
+```sql
+-- Confirm that the encrypted user columns exist.
+DESCRIBE user;
+
+-- Inspect protected user fields without selecting plaintext PII.
+SELECT
+	user_id,
+	LEFT(email_encrypted, 24) AS email_ciphertext_sample,
+	CHAR_LENGTH(email_encrypted) AS email_ciphertext_length,
+	email_lookup,
+	LEFT(name_encrypted, 24) AS name_ciphertext_sample,
+	CHAR_LENGTH(name_encrypted) AS name_ciphertext_length,
+	pii_key_version,
+	LEFT(password, 7) AS password_hash_prefix
+FROM user;
+
+-- Verify that email lookup values are versioned HMAC values.
+SELECT user_id, email_lookup
+FROM user;
+
+-- Confirm the problem-report table and its protected column.
+DESCRIBE report;
+
+-- Inspect report metadata and ciphertext without revealing the problem text.
+SELECT
+	report_id,
+	student_id,
+	created_at,
+	CHAR_LENGTH(encrypted_problem) AS ciphertext_length,
+	LEFT(encrypted_problem, 40) AS ciphertext_sample
+FROM report
+ORDER BY created_at DESC;
+
+-- Count reports currently awaiting registrar review.
+SELECT COUNT(*) AS open_report_count
+FROM report;
+```
+
+These SQL queries intentionally do not decrypt values. AES keys, HMAC keys, RSA keys, and the decryption logic remain outside MySQL. Use the authenticated API endpoints below to retrieve user-facing values or view a report through the backend.
+
 ### Existing Data Migration
 
 For an existing database that still has plaintext `user.email` / `user.name` and email foreign keys:
@@ -168,6 +237,7 @@ For a clean encrypted schema bootstrap, use [migrations/university5_encrypted_sc
 | GET    | /students/courses/:courseId               | courseId                                        |
 | POST   | /students/add-course                      | studentId, courseId, sectionId, advisorId       |
 | POST   | /students/drop-course                     | studentId, courseId, sectionId                  |
+| POST   | /students/report                          | studentId, problemText                          |
 | GET    | /students/my-courses/:studentId           | studentId                                       |
 | GET    | /students/info/:studentId                 | studentId                                       |
 | PUT    | /students/confirm-advising/:studentId     | studentId                                       |
@@ -202,6 +272,9 @@ For a clean encrypted schema bootstrap, use [migrations/university5_encrypted_sc
 | DELETE | /registrars/course/:courseId               | courseId                                                         |
 | POST   | /registrars/section                        | courseId, sectionId, schedule, faculty, seatAvailability         |
 | DELETE | /registrars/section/:courseId/:sectionId   | courseId, sectionId                                              |
+| GET    | /registrars/reports                        | -                                                                |
+| POST   | /registrars/reports/:reportId/decrypt      | reportId                                                         |
+| DELETE | /registrars/reports/:reportId              | reportId                                                         |
 
 
 
