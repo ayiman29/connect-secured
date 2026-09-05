@@ -419,6 +419,79 @@ Chat routes require the full session token issued after 2FA. Students can choose
 | POST   | /chat/send                      | sessionId, text           |
 | GET    | /chat/advisor/contacts          | -                         |
 
+---
+
+### Comment
+
+The Comment section is a short-lived shared discussion area at the end of each student, advisor, and registrar view. It is intended for announcements, quick updates, course questions, and general coordination between authenticated users. It is separate from private student-advisor chat: comments are visible to all authenticated users, while chat messages are limited to the two participants in a conversation.
+
+#### Comment lifecycle
+
+1. An authenticated student, advisor, or registrar submits text through the Comment form.
+2. The backend validates the content, limits it to 2,000 characters, encrypts it with the server RSA public key, and stores only the encrypted value in `comment.content_encrypted`.
+3. The backend decrypts the content when an authenticated user requests the comment list. The frontend displays the author, content, creation time, and expiration time, but never displays ciphertext or keys.
+4. Every comment receives an `expires_at` timestamp exactly 24 hours after creation.
+5. Expired comments are excluded from queries and deleted by the backend cleanup task, which runs at startup and every ten minutes. This means comments are removed no later than the next cleanup interval after their 24-hour lifetime.
+
+#### Permissions
+
+| Operation | Student | Advisor | Registrar |
+| --------- | ------- | ------- | --------- |
+| View active comments | Yes | Yes | Yes |
+| Add a comment | Yes | Yes | Yes |
+| Edit own comment | Yes | Yes | Yes |
+| Delete own comment | Yes | Yes | Yes |
+| Delete another user's comment | No | No | Yes |
+
+Ownership is enforced by the backend using the authenticated user's `userId` from the JWT. The frontend controls are only a convenience; changing a request manually cannot bypass the owner check. Registrars are allowed to delete any comment for moderation.
+
+#### Encrypted storage
+
+The comment body is encrypted before insertion:
+
+```javascript
+const encryptedContent = await encryptWithRsa(content);
+
+await pool.query(
+	`INSERT INTO comment
+		(user_id, content_encrypted, created_at, expires_at)
+	 VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 24 HOUR))`,
+	[userId, encryptedContent]
+);
+```
+
+The `comment` table does not contain a plaintext content column:
+
+```sql
+CREATE TABLE comment (
+	comment_id INT AUTO_INCREMENT PRIMARY KEY,
+	user_id INT NOT NULL,
+	content_encrypted LONGTEXT NOT NULL,
+	created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	expires_at DATETIME NOT NULL,
+	FOREIGN KEY (user_id) REFERENCES user(user_id) ON DELETE CASCADE
+);
+```
+
+#### Setup and API
+
+Apply the comment migration after the main university schema has been created:
+
+```bash
+mysql -u <db_user> -p <database_name> < migrations/comment_schema.sql
+```
+
+All endpoints require the full authenticated session token issued after 2FA:
+
+| Method | Endpoint | Body / behavior |
+| ------ | -------- | --------------- |
+| GET | `/comments` | Returns active, decrypted comments. Expired comments are removed first. |
+| POST | `/comments` | `{ "content": "..." }`; creates a comment owned by the JWT user. |
+| PUT | `/comments/:commentId` | `{ "content": "..." }`; only the owner can edit before expiry. |
+| DELETE | `/comments/:commentId` | The owner can delete their own comment; a registrar can delete any comment. |
+
+The frontend automatically refreshes the Comment section periodically, so expired comments disappear from the interface without exposing implementation details to users.
+
 
 
 ## ER and Schema

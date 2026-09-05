@@ -6,7 +6,7 @@ import RegistrarView from "./RegistrarView";
 
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5050";
-const API_PREFIXES = ["/auth", "/students", "/advisors", "/registrar", "/chat"];
+const API_PREFIXES = ["/auth", "/students", "/advisors", "/registrar", "/chat", "/comments"];
 const _fetch = window.fetch.bind(window);
 
 window.fetch = (input, init = {}) => {

@@ -5,6 +5,7 @@ import "./Panel.css";
 import "./AdvisorView.css";
 import "./Nav.css";
 import ChatWidget from "./ChatWidget";
+import CommentSection from "./CommentSection";
 import bracuLogo from "./assets/bracu.png";
 import notifButton from "./assets/bell_icon.png";
 
@@ -640,6 +641,7 @@ export default function AdvisorView() {
         {toastMsg}
       </CuteToast>
       <ChatWidget role="advisor" studentId={studentId} />
+      <CommentSection />
     </div>
   );
 }

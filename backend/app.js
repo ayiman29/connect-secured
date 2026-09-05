@@ -6,7 +6,9 @@ import advisorRoutes from './routes/advisorRoutes.js';
 import registrarRoutes from './routes/registrarRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
+import commentRoutes from './routes/commentRoutes.js';
 import { ensureServerKeys } from './lib/security/crypto101RsaService.js';
+import { deleteExpiredComments } from './models/commentModel.js';
 
 const app = express();
 const PORT = process.env.PORT || 5050;
@@ -40,9 +42,16 @@ app.use('/advisors', advisorRoutes);
 app.use('/registrars', registrarRoutes);
 app.use('/auth', authRoutes);
 app.use('/chat', chatRoutes);
+app.use('/comments', commentRoutes);
 
 async function startServer() {
   await ensureServerKeys();
+  await deleteExpiredComments();
+  setInterval(() => {
+    deleteExpiredComments().catch((error) => {
+      console.error('Failed to remove expired comments:', error.message);
+    });
+  }, 10 * 60 * 1000);
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });

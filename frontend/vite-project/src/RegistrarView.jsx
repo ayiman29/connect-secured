@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import "./RegistrarView.css";
 import "./Nav.css";
+import CommentSection from "./CommentSection";
 import bracuLogo from "./assets/bracu.png";
 
 // config 
@@ -586,6 +587,7 @@ export default function RegistrarView() {
           </section>
         </div>
       </div>
+      <CommentSection />
     </div>
   );
 }

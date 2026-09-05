@@ -4,6 +4,7 @@ import SelectedSections from "./SelectedSections";
 import "./Panel.css";
 import NavBar from "./Nav.jsx";
 import ChatWidget from "./ChatWidget";
+import CommentSection from "./CommentSection";
 
 function CuteToast({ open, onClose, children }) {
   useEffect(() => {
@@ -651,6 +652,7 @@ export default function StudentView() {
 
       <CuteToast open={toastOpen} onClose={() => setToastOpen(false)}>{toastMsg}</CuteToast>
       <ChatWidget role="student" studentId={studentId} />
+      <CommentSection />
     </div>
   );
 }
