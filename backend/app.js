@@ -6,12 +6,11 @@ import advisorRoutes from './routes/advisorRoutes.js';
 import registrarRoutes from './routes/registrarRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
-import { validateSecurityConfiguration } from './lib/security/cryptoService.js';
+import { ensureServerKeys } from './lib/security/crypto101RsaService.js';
 
 const app = express();
 const PORT = process.env.PORT || 5050;
 
-validateSecurityConfiguration();
 const allowedOrigins = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
@@ -42,6 +41,14 @@ app.use('/registrars', registrarRoutes);
 app.use('/auth', authRoutes);
 app.use('/chat', chatRoutes);
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+async function startServer() {
+  await ensureServerKeys();
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
 });

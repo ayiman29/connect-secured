@@ -1,6 +1,6 @@
 import pool from '../db.js';
 import { generateEccKeypair } from '../lib/security/chatCryptoService.js';
-import { decryptValue } from '../lib/security/cryptoService.js';
+import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
 
 /**
  * Retrieve or automatically generate a user's ECC key pair using crypto101
@@ -144,11 +144,11 @@ export async function getAdvisorChatContacts(advisorId) {
     [advisorId]
   );
 
-  return rows.map((r) => {
+  return Promise.all(rows.map(async (r) => {
     let studentName = `Student ${r.student_id}`;
     if (r.name_encrypted) {
       try {
-        studentName = decryptValue(r.name_encrypted);
+        studentName = await decryptWithRsa(r.name_encrypted);
       } catch {}
     }
     return {
@@ -157,7 +157,7 @@ export async function getAdvisorChatContacts(advisorId) {
       student_name: studentName,
       last_message_at: r.last_message_at,
     };
-  });
+  }));
 }
 
 /**
@@ -171,15 +171,15 @@ export async function getChatAdvisors() {
      ORDER BY a.advisor_id ASC`
   );
 
-  return rows.map((row) => {
+  return Promise.all(rows.map(async (row) => {
     let name = `Advisor ${row.advisor_id}`;
     try {
-      name = decryptValue(row.name_encrypted);
+      name = await decryptWithRsa(row.name_encrypted);
     } catch {}
 
     return {
       advisor_id: row.advisor_id,
       name,
     };
-  });
+  }));
 }

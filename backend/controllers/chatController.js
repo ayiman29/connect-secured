@@ -6,7 +6,7 @@ import {
   encryptMessage,
   decryptMessage,
 } from '../lib/security/chatCryptoService.js';
-import { decryptValue } from '../lib/security/cryptoService.js';
+import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
 
 const DEFAULT_ADVISOR_ID = 10000501;
 
@@ -41,7 +41,7 @@ async function getAdvisorInfo(advisorId) {
   if (!rows.length) return { advisor_id: advisorId, name: 'Advisor' };
   let name = 'Advisor';
   try {
-    name = decryptValue(rows[0].name_encrypted);
+    name = await decryptWithRsa(rows[0].name_encrypted);
   } catch {}
   return { advisor_id: advisorId, name };
 }
@@ -57,7 +57,7 @@ async function getStudentInfo(studentId) {
   if (!rows.length) return { student_id: studentId, name: `Student ${studentId}` };
   let name = `Student ${studentId}`;
   try {
-    name = decryptValue(rows[0].name_encrypted);
+    name = await decryptWithRsa(rows[0].name_encrypted);
   } catch {}
   return { student_id: studentId, name };
 }

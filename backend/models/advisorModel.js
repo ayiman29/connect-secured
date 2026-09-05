@@ -1,7 +1,8 @@
 import pool from '../db.js'
 import { addCourse as studentAddCourse, dropCourse as studentDropCourse } from './studentModel.js';
 import { createUser } from './userModel.js';
-import { decryptValue, getEmailLookup } from '../lib/security/cryptoService.js';
+import { getEmailLookup } from '../lib/security/cryptoService.js';
+import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
 
 
 export async function createAdvisor(advisorId, email, name, password) {
@@ -35,24 +36,24 @@ export async function getWaitingStudentsCourses() {
     ORDER BY st.student_id, c.course_id, s.section_id`
   );
 
-  const grouped = rows.reduce((acc, row) => {
-    if (!acc[row.student_id]) {
-      acc[row.student_id] = {
+  const grouped = {};
+  for (const row of rows) {
+    if (!grouped[row.student_id]) {
+      grouped[row.student_id] = {
         student_id: row.student_id,
-        student_name: decryptValue(row.student_name_encrypted),
+        student_name: await decryptWithRsa(row.student_name_encrypted),
         status: row.status,
         courses: []
       };
     }
-    acc[row.student_id].courses.push({
+    grouped[row.student_id].courses.push({
       course_id: row.course_id,
       title: row.title,
       section_id: row.section_id,
       schedule: row.schedule,
       faculty: row.faculty
     });
-    return acc;
-  }, {});
+  }
 
   return Object.values(grouped);
 }
@@ -238,7 +239,7 @@ export async function getAdvisorIdByEmail(email) {
 
   return {
     advisor_id: rows[0].advisor_id,
-    email: decryptValue(rows[0].email_encrypted),
+    email: await decryptWithRsa(rows[0].email_encrypted),
   };
 }
 

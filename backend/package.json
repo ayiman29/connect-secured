@@ -5,7 +5,8 @@
   "main": "database.js",
   "scripts": {
     "dev": "npx nodemon app.js",
-    "migrate:user-encryption": "node scripts/migrateUserEncryption.js"
+    "migrate:user-encryption": "node scripts/migrateUserEncryption.js",
+    "migrate:rsa-encryption": "node scripts/migrateToRsaEncryption.js"
   },
   "keywords": [],
   "author": "",

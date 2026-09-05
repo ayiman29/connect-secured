@@ -1,6 +1,7 @@
 import pool from '../db.js'
 import { createUser } from './userModel.js';
-import { decryptValue, getEmailLookup } from '../lib/security/cryptoService.js';
+import { getEmailLookup } from '../lib/security/cryptoService.js';
+import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
 
 
 export async function createStudent(studentId, email, name, password, credit) {
@@ -29,7 +30,7 @@ export async function getStudentIdByEmail(email) {
 
   return {
     student_id: rows[0].student_id,
-    email: decryptValue(rows[0].email_encrypted),
+    email: await decryptWithRsa(rows[0].email_encrypted),
   };
 }
 
@@ -325,8 +326,8 @@ export async function getStudentInfo(studentId) {
     student_id: info[0].student_id,
     credit: info[0].credit,
     status: info[0].status,
-    email: decryptValue(info[0].email_encrypted),
-    name: decryptValue(info[0].name_encrypted),
+    email: await decryptWithRsa(info[0].email_encrypted),
+    name: await decryptWithRsa(info[0].name_encrypted),
   };
 }
 

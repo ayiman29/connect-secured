@@ -8,7 +8,8 @@ import {
 import { createStudent } from '../models/studentModel.js';
 import { createAdvisor } from '../models/advisorModel.js';
 import { createRegistrar } from '../models/registrarModel.js';
-import { decryptValue } from '../lib/security/cryptoService.js';
+// PII decryption is handled inside userModel via crypto101 RSA — no AES import needed.
+import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import speakeasy from 'speakeasy';
@@ -179,8 +180,8 @@ export async function verifyTotp(req, res) {
       return res.status(400).json({ message: 'TOTP not set up for this account.' });
     }
 
-    // Decrypt the stored secret before verifying.
-    const plaintextSecret = decryptValue(user.totp_secret);
+    // Decrypt the stored secret with the server's RSA private key (crypto101).
+    const plaintextSecret = await decryptWithRsa(user.totp_secret);
 
     const valid = speakeasy.totp.verify({
       secret: plaintextSecret,

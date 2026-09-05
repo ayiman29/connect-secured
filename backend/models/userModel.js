@@ -1,19 +1,16 @@
 import pool from '../db.js';
 import bcrypt from 'bcrypt';
-import {
-  decryptValue,
-  encryptValue,
-  getEmailLookup,
-  normalizeEmail,
-} from '../lib/security/cryptoService.js';
+import { getEmailLookup, normalizeEmail } from '../lib/security/cryptoService.js';
+import { encryptWithRsa, decryptWithRsa } from '../lib/security/crypto101RsaService.js';
 
 export async function createUser(email, name, password) {
   const normalizedEmail = normalizeEmail(email);
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  const encryptedEmail = encryptValue(normalizedEmail);
-  const encryptedName = encryptValue(name);
-  const emailLookup = getEmailLookup(normalizedEmail);
+  // Encrypt PII with RSA (crypto101) instead of AES.
+  const encryptedEmail = await encryptWithRsa(normalizedEmail);
+  const encryptedName  = await encryptWithRsa(name);
+  const emailLookup    = getEmailLookup(normalizedEmail);
 
   await pool.query(
     `INSERT INTO user (email_encrypted, email_lookup, name_encrypted, password)
@@ -50,8 +47,8 @@ export async function findUserByEmail(email) {
   const user = rows[0];
   return {
     user_id: user.user_id,
-    email: decryptValue(user.email_encrypted),
-    name: decryptValue(user.name_encrypted),
+    email: await decryptWithRsa(user.email_encrypted),
+    name:  await decryptWithRsa(user.name_encrypted),
     password: user.password,
     totp_secret: user.totp_secret,
     totp_enabled: !!user.totp_enabled,
@@ -72,15 +69,16 @@ export async function getUserById(userId) {
   const user = rows[0];
   return {
     user_id: user.user_id,
-    email: decryptValue(user.email_encrypted),
-    name: decryptValue(user.name_encrypted),
+    email: await decryptWithRsa(user.email_encrypted),
+    name:  await decryptWithRsa(user.name_encrypted),
     totp_secret: user.totp_secret,
     totp_enabled: !!user.totp_enabled,
   };
 }
 
 export async function saveTotpSecret(userId, plaintextSecret) {
-  const encryptedSecret = encryptValue(plaintextSecret);
+  // Encrypt the TOTP secret with the server's RSA public key (crypto101).
+  const encryptedSecret = await encryptWithRsa(plaintextSecret);
   await pool.query(
     `UPDATE user SET totp_secret = ?, totp_enabled = 0 WHERE user_id = ?`,
     [encryptedSecret, userId]

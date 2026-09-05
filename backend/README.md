@@ -44,40 +44,22 @@ This section describes how the API protects user authentication data and user pe
 
 During registration, the user's normalized email address and name are encrypted before insertion into the `user` table. The database stores these values in `email_encrypted` and `name_encrypted`; plaintext email and name columns are removed by the migration process.
 
-The current implementation uses **AES-256-GCM**. AES-GCM provides confidentiality and authenticated encryption. A fresh random 12-byte initialization vector (IV) is generated for every value, so encrypting the same value twice produces different ciphertext.
+The current implementation uses the existing `crypto101` RSA bridge for server-only user PII and TOTP secrets. The server encrypts these values with a dedicated RSA public key and decrypts them with the matching RSA private key. RSA payloads are processed in 40-character chunks by the Python bridge.
 
 ```javascript
-const iv = crypto.randomBytes(IV_LENGTH);
-const key = getEncryptionKeyByVersion(ENCRYPTION_KEY_VERSION);
-const cipher = crypto.createCipheriv('aes-256-gcm', key, iv, {
-	authTagLength: 16,
-});
-
-const encrypted = Buffer.concat([
-	cipher.update(String(plainText), 'utf8'),
-	cipher.final(),
-]);
-const authTag = cipher.getAuthTag();
+const ciphertext = await encryptWithRsa(String(plainText));
 ```
 
-The stored encrypted value contains the key version, IV, authentication tag, and ciphertext:
+The stored RSA value contains colon-separated numeric ciphertext chunks:
 
 ```text
-version:iv:authentication_tag:ciphertext
+chunk_1:chunk_2:chunk_3
 ```
 
-When the value is retrieved, the application selects the key using the stored version, sets the authentication tag, and decrypts the ciphertext. If the ciphertext or tag has been modified, decryption fails instead of returning untrusted plaintext.
+When the value is retrieved, the application passes the ciphertext to the Python bridge with the server's private key. The bridge decrypts each chunk and joins the recovered plaintext before it is used by the model layer.
 
 ```javascript
-const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv, {
-	authTagLength: 16,
-});
-decipher.setAuthTag(authTag);
-
-const decrypted = Buffer.concat([
-	decipher.update(ciphertext),
-	decipher.final(),
-]);
+const plaintext = await decryptWithRsa(ciphertext);
 ```
 
 ### Password Protection
@@ -91,7 +73,7 @@ const passwordMatches = await bcrypt.compare(password, user.password);
 
 ### Integrity Protection
 
-AES-GCM generates an authentication tag for each encrypted value. The tag detects unauthorized changes to the IV, ciphertext, or authenticated encryption data. Any failed verification causes decryption to throw an error.
+RSA encryption in the educational `crypto101` bridge provides confidentiality for server-only PII and TOTP values. The current RSA payload format does not include an authenticated-encryption tag, so deployments should protect the RSA key file and database access carefully. A tamper-evident integrity check is provided for chat message bodies by AES-GCM: its authentication tag detects changes to the ciphertext, IV, or tag, and failed verification prevents the message from being returned.
 
 The API also uses **HMAC-SHA256** with a separate secret key to create a deterministic, protected lookup value for email addresses. This allows the application to find a user without storing a plaintext email or using the encrypted email value as a database lookup key.
 
@@ -104,7 +86,7 @@ const digest = crypto
 const emailLookup = `${LOOKUP_KEY_VERSION}:${digest}`;
 ```
 
-The HMAC key is separate from the AES encryption key. A database user who does not have the application secrets cannot create valid lookup values or valid encrypted payloads.
+The HMAC key is separate from the RSA and chat keys. A database user who does not have the application secrets cannot create valid email lookup values or decrypt protected payloads.
 
 ### Two-Factor Authentication (2FA)
 
@@ -119,17 +101,17 @@ The flow is:
 3. The user enters the authenticator code through `POST /auth/verify-totp`.
 4. The backend decrypts the stored secret, validates the code with a one-step clock-skew window, enables TOTP on first successful verification, and returns the full session token.
 
-The TOTP secret is encrypted with the existing AES-256-GCM field-encryption service before storage. It is never returned as plaintext by the API. Passwords remain bcrypt hashes and are never decrypted.
+The TOTP secret is encrypted with the server RSA public key before storage. It is never returned as plaintext by the API. Passwords remain bcrypt hashes and are never decrypted.
 
 ```javascript
 // Step 1: password verification returns a limited pre-auth token.
 const preAuthToken = issuePreAuthToken(user.user_id);
 
 // Step 2: the secret is encrypted before it is stored.
-const encryptedSecret = encryptValue(plaintextSecret);
+const encryptedSecret = await encryptWithRsa(plaintextSecret);
 
 // Step 3: the secret is decrypted only inside the verification path.
-const plaintextSecret = decryptValue(user.totp_secret);
+const plaintextSecret = await decryptWithRsa(user.totp_secret);
 const valid = speakeasy.totp.verify({
 	secret: plaintextSecret,
 	encoding: 'base32',
@@ -144,23 +126,19 @@ The pre-auth token is intentionally accepted only by the enrollment and verifica
 
 The application loads cryptographic secrets from environment variables rather than storing them in the database:
 
-- `ENCRYPTION_KEY`: 32-byte AES key encoded as 64 hexadecimal characters.
 - `EMAIL_LOOKUP_KEY`: separate 32-byte HMAC key encoded as 64 hexadecimal characters.
-- `ENCRYPTION_KEY_VERSION`: active encryption key version, default `v1`.
 - `EMAIL_LOOKUP_KEY_VERSION`: active lookup key version, default `v1`.
-- `ENCRYPTION_KEY_<VERSION>` and `EMAIL_LOOKUP_KEY_<VERSION>`: optional older keys used to decrypt or validate data created under a previous version.
+- `CRYPTO101_PATH`: optional path to the existing `crypto101` Python package.
+- `PYTHON_PATH`: optional Python executable path used to run `crypto101_bridge.py`.
 - `JWT_SECRET`: separate secret used to sign authentication tokens.
 
-Key values are validated at application startup:
+The server RSA key pair is generated through `crypto101` and saved to `config/server_rsa_keys.json` on first startup. Keep this file private and back it up securely; losing the private key makes existing RSA-encrypted PII and TOTP secrets unreadable.
 
 ```javascript
-export function validateSecurityConfiguration() {
-	parseHexKey(process.env.ENCRYPTION_KEY, 'ENCRYPTION_KEY');
-	parseHexKey(process.env.EMAIL_LOOKUP_KEY, 'EMAIL_LOOKUP_KEY');
-}
+await ensureServerKeys();
 ```
 
-Key-version support allows a controlled migration to a new key: configure the new active version while retaining the previous version for reading existing data, then re-encrypt existing records and retire the old key according to the deployment's key-management policy. The current application does not provide a dedicated key vault or automatic key-generation service, so production secrets should be supplied by a secure secret-management system.
+The old `ENCRYPTION_KEY` is required only while migrating legacy AES-encrypted rows. After all PII and TOTP values have been converted, it can be removed from the runtime environment. `EMAIL_LOOKUP_KEY` must remain because email lookup continues to use HMAC-SHA256.
 
 ### Student Problem Reports
 
@@ -461,15 +439,15 @@ Chat routes require the full session token issued after 2FA. Students can choose
 
 ## Key Generation Commands
 
-Generate a 32-byte AES key for `ENCRYPTION_KEY`:
+Generate a separate 32-byte HMAC key for `EMAIL_LOOKUP_KEY`:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-Generate a separate 32-byte HMAC key for `EMAIL_LOOKUP_KEY`:
+The server RSA key pair is generated automatically through `crypto101` on backend startup. To convert existing AES-encrypted PII and TOTP values to RSA, run the migration once:
 
 ```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+npm run migrate:rsa-encryption
 ```
 

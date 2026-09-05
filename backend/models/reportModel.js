@@ -1,5 +1,5 @@
 import pool from '../db.js';
-import { decryptValue } from '../lib/security/cryptoService.js';
+import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
 
 export async function createReport(studentId, encryptedProblem) {
   const [result] = await pool.query(
@@ -27,11 +27,11 @@ export async function getAllReports() {
      ORDER BY r.created_at DESC`
   );
 
-  return rows.map((row) => {
+  return Promise.all(rows.map(async (row) => {
     let studentName = `Student ${row.student_id}`;
     if (row.name_encrypted) {
       try {
-        studentName = decryptValue(row.name_encrypted);
+        studentName = await decryptWithRsa(row.name_encrypted);
       } catch {}
     }
     return {
@@ -41,7 +41,7 @@ export async function getAllReports() {
       encrypted_problem: row.encrypted_problem,
       created_at: row.created_at,
     };
-  });
+  }));
 }
 
 export async function getReportById(reportId) {
