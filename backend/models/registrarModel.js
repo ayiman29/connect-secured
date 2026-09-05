@@ -1,5 +1,6 @@
 import pool from '../db.js';
 import { createUser } from './userModel.js';
+import { encryptCourseFields, encryptSectionFields } from '../lib/security/courseCryptoService.js';
 
 
 export async function createRegistrar(registrarId, email, name, password) {
@@ -13,16 +14,17 @@ export async function createRegistrar(registrarId, email, name, password) {
 }
 
 export async function addCourse(courseId, title, name, examSchedule, courseCredit, registrarId) {
+  const encrypted = await encryptCourseFields({ title, name, examSchedule });
   await pool.query(
-    `INSERT INTO course (course_id, title, name, exam_schedule, course_credit, registrar_id)
+    `INSERT INTO course (course_id, title_encrypted, name_encrypted, exam_schedule_encrypted, course_credit, registrar_id)
      VALUES (?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
-       title = VALUES(title),
-       name = VALUES(name),
-       exam_schedule = VALUES(exam_schedule),
+       title_encrypted = VALUES(title_encrypted),
+       name_encrypted = VALUES(name_encrypted),
+       exam_schedule_encrypted = VALUES(exam_schedule_encrypted),
        course_credit = VALUES(course_credit),
        registrar_id = VALUES(registrar_id)`,
-    [courseId, title, name, examSchedule, courseCredit, registrarId]
+    [courseId, encrypted.titleEncrypted, encrypted.nameEncrypted, encrypted.examScheduleEncrypted, courseCredit, registrarId]
   );
 }
 
@@ -36,14 +38,15 @@ export async function deleteCourse(courseId) {
 
 
 export async function addSection(courseId, sectionId, schedule, seatAvailability = 40, faculty) {
+  const encrypted = await encryptSectionFields({ schedule, faculty });
   await pool.query(
-    `INSERT INTO section (course_id, section_id, schedule, seat_availability, faculty)
+    `INSERT INTO section (course_id, section_id, schedule_encrypted, seat_availability, faculty_encrypted)
      VALUES (?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
-       schedule = VALUES(schedule),
+       schedule_encrypted = VALUES(schedule_encrypted),
        seat_availability = VALUES(seat_availability),
-       faculty = VALUES(faculty)`,
-    [courseId, sectionId, schedule, seatAvailability, faculty]
+       faculty_encrypted = VALUES(faculty_encrypted)`,
+    [courseId, sectionId, encrypted.scheduleEncrypted, seatAvailability, encrypted.facultyEncrypted]
   );
 }
 

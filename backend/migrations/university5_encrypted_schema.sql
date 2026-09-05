@@ -50,9 +50,9 @@ CREATE TABLE `student` (
 
 CREATE TABLE `course` (
   `course_id` int NOT NULL,
-  `title` varchar(100),
-  `name` varchar(100),
-  `exam_schedule` datetime,
+  `title_encrypted` text,
+  `name_encrypted` text,
+  `exam_schedule_encrypted` text,
   `course_credit` int,
   `registrar_id` int NOT NULL,
   PRIMARY KEY (`course_id`),
@@ -62,8 +62,8 @@ CREATE TABLE `course` (
 CREATE TABLE `section` (
   `course_id` int NOT NULL,
   `section_id` int NOT NULL,
-  `schedule` varchar(100),
-  `faculty` varchar(100),
+  `schedule_encrypted` text,
+  `faculty_encrypted` text,
   `seat_availability` int DEFAULT 40,
   PRIMARY KEY (`course_id`,`section_id`),
   CONSTRAINT `fk_section_course` FOREIGN KEY (`course_id`) REFERENCES `course`(`course_id`) ON DELETE CASCADE

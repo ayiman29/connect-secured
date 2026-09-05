@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS `user_ecc_key` (
   `user_id` INT NOT NULL PRIMARY KEY,
   `public_key_x` VARCHAR(100) NOT NULL,
   `public_key_y` VARCHAR(100) NOT NULL,
-  `private_key` VARCHAR(100) NOT NULL,
+  `private_key_encrypted` TEXT NOT NULL,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT `fk_ecc_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`user_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

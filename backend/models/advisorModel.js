@@ -3,6 +3,7 @@ import { addCourse as studentAddCourse, dropCourse as studentDropCourse } from '
 import { createUser } from './userModel.js';
 import { getEmailLookup } from '../lib/security/cryptoService.js';
 import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
+import { decryptCourseFields, decryptSectionFields } from '../lib/security/courseCryptoService.js';
 
 
 export async function createAdvisor(advisorId, email, name, password) {
@@ -23,10 +24,12 @@ export async function getWaitingStudentsCourses() {
       u.name_encrypted AS student_name_encrypted,
       st.status,
       c.course_id,
-      c.title,
+      c.title_encrypted,
+      c.name_encrypted AS course_name_encrypted,
+      c.exam_schedule_encrypted,
       s.section_id,
-      s.schedule,
-      s.faculty
+      s.schedule_encrypted,
+      s.faculty_encrypted
     FROM manages sc
     JOIN student st ON sc.student_id = st.student_id
     JOIN user u ON st.user_id = u.user_id
@@ -48,10 +51,10 @@ export async function getWaitingStudentsCourses() {
     }
     grouped[row.student_id].courses.push({
       course_id: row.course_id,
-      title: row.title,
+      title: (await decryptCourseFields(row)).title,
       section_id: row.section_id,
-      schedule: row.schedule,
-      faculty: row.faculty
+      schedule: (await decryptSectionFields(row)).schedule,
+      faculty: (await decryptSectionFields(row)).faculty
     });
   }
 
@@ -99,12 +102,12 @@ export async function getStudentCourses(studentId) {
   const [courses] = await pool.query(
     `SELECT 
         c.course_id,
-        c.title,
-        c.name,
+        c.title_encrypted,
+        c.name_encrypted AS course_name_encrypted,
+        c.exam_schedule_encrypted,
         s.section_id,
-        s.schedule,
-        s.faculty,
-        s.schedule,
+        s.schedule_encrypted,
+        s.faculty_encrypted,
         c.course_credit,
         s.seat_availability
   
@@ -114,7 +117,11 @@ export async function getStudentCourses(studentId) {
      WHERE m.student_id = ?`,
     [studentId]
   );
-  return courses;
+  return Promise.all(courses.map(async (course) => ({
+    ...course,
+    ...(await decryptCourseFields(course)),
+    ...(await decryptSectionFields(course)),
+  })));
 }
 
 
@@ -122,14 +129,14 @@ export async function fetchUnselectedCourses(studentId) {
   const query = `
     SELECT 
       c.course_id,
-      c.title,
-      c.name AS course_name,
-      c.exam_schedule,
+        c.title_encrypted,
+      c.name_encrypted AS course_name_encrypted,
+      c.exam_schedule_encrypted,
       c.course_credit,
       s.section_id,
-      s.schedule,
+      s.schedule_encrypted,
       s.seat_availability,
-      s.faculty
+      s.faculty_encrypted
     FROM course c
     JOIN section s 
       ON c.course_id = s.course_id
@@ -158,9 +165,7 @@ export async function fetchUnselectedCourses(studentId) {
     if (!courseMap.has(row.course_id)) {
       courseMap.set(row.course_id, {
         course_id: row.course_id,
-        title: row.title,
-        course_name: row.course_name,
-        exam_schedule: row.exam_schedule,
+        ...(await decryptCourseFields(row)),
         course_credit: row.course_credit,
         sections: []
       });
@@ -169,9 +174,9 @@ export async function fetchUnselectedCourses(studentId) {
     
     courseMap.get(row.course_id).sections.push({
       section_id: row.section_id,
-      schedule: row.schedule,
+      schedule: (await decryptSectionFields(row)).schedule,
       seat_availability: row.seat_availability,
-      faculty: row.faculty
+      faculty: (await decryptSectionFields(row)).faculty
     });
   }
 
@@ -183,14 +188,14 @@ export async function getCourseDetail(courseId) {
   const query = `
     SELECT 
       c.course_id,
-      c.title,
-      c.name AS course_name,
-      c.exam_schedule,
+      c.title_encrypted,
+      c.name_encrypted AS course_name_encrypted,
+      c.exam_schedule_encrypted,
       c.course_credit,
       s.section_id,
-      s.schedule,
+      s.schedule_encrypted,
       s.seat_availability,
-      s.faculty
+      s.faculty_encrypted
     FROM course c
     JOIN section s ON c.course_id = s.course_id
     WHERE c.course_id = ?
@@ -203,9 +208,7 @@ export async function getCourseDetail(courseId) {
 
   const course = {
     course_id: rows[0].course_id,
-    title: rows[0].title,
-    course_name: rows[0].course_name,
-    exam_schedule: rows[0].exam_schedule,
+    ...(await decryptCourseFields(rows[0])),
     course_credit: rows[0].course_credit,
     sections: []
   };
@@ -213,9 +216,9 @@ export async function getCourseDetail(courseId) {
   for (const row of rows) {
     course.sections.push({
       section_id: row.section_id,
-      schedule: row.schedule,
+      schedule: (await decryptSectionFields(row)).schedule,
       seat_availability: row.seat_availability,
-      faculty: row.faculty
+      faculty: (await decryptSectionFields(row)).faculty
     });
   }
 

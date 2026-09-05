@@ -147,3 +147,21 @@ export async function decryptWithRsa(ciphertext) {
   });
   return res.plaintext;
 }
+
+export async function decryptWithRsaKey(ciphertext, privateKey) {
+  const res = await runPythonBridge(['decrypt'], {
+    ciphertext: String(ciphertext || ''),
+    privateKey,
+  });
+  return res.plaintext;
+}
+
+export async function rotateServerKeys() {
+  const currentKeys = await ensureServerKeys();
+  const backupPath = `${SERVER_KEYS_FILE_PATH}.backup-${Date.now()}`;
+  fs.copyFileSync(SERVER_KEYS_FILE_PATH, backupPath);
+  const nextKeys = await runPythonBridge(['generate-keys', '512']);
+  fs.writeFileSync(SERVER_KEYS_FILE_PATH, JSON.stringify(nextKeys, null, 2), 'utf8');
+  cachedServerKeys = nextKeys;
+  return { previousKeys: currentKeys, nextKeys, backupPath };
+}

@@ -1,13 +1,14 @@
 import pool from '../db.js';
 import { generateEccKeypair } from '../lib/security/chatCryptoService.js';
 import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
+import { encryptWithManagedKey, decryptWithManagedKey } from '../lib/security/keyManagementService.js';
 
 /**
  * Retrieve or automatically generate a user's ECC key pair using crypto101
  */
 export async function getOrCreateUserEccKeys(userId) {
   const [rows] = await pool.query(
-    `SELECT user_id, public_key_x, public_key_y, private_key
+    `SELECT user_id, public_key_x, public_key_y, private_key_encrypted
      FROM user_ecc_key
      WHERE user_id = ?
      LIMIT 1`,
@@ -16,7 +17,7 @@ export async function getOrCreateUserEccKeys(userId) {
 
   if (rows.length > 0) {
     return {
-      privateKey: rows[0].private_key,
+      privateKey: await decryptWithManagedKey(rows[0].private_key_encrypted),
       publicKey: {
         x: rows[0].public_key_x,
         y: rows[0].public_key_y,
@@ -27,14 +28,15 @@ export async function getOrCreateUserEccKeys(userId) {
   // Generate new ECC keypair from crypto101/ecc.py
   const keys = await generateEccKeypair();
 
+  const encryptedPrivateKey = await encryptWithManagedKey(keys.privateKey);
   await pool.query(
-    `INSERT INTO user_ecc_key (user_id, public_key_x, public_key_y, private_key)
+    `INSERT INTO user_ecc_key (user_id, public_key_x, public_key_y, private_key_encrypted)
      VALUES (?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
        public_key_x = VALUES(public_key_x),
        public_key_y = VALUES(public_key_y),
-       private_key = VALUES(private_key)`,
-    [userId, keys.publicKey.x, keys.publicKey.y, keys.privateKey]
+       private_key_encrypted = VALUES(private_key_encrypted)`,
+    [userId, keys.publicKey.x, keys.publicKey.y, encryptedPrivateKey]
   );
 
   return keys;

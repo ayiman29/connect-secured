@@ -7,7 +7,7 @@ import registrarRoutes from './routes/registrarRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import commentRoutes from './routes/commentRoutes.js';
-import { ensureServerKeys } from './lib/security/crypto101RsaService.js';
+import { initializeKeyManagement } from './lib/security/keyManagementService.js';
 import { deleteExpiredComments } from './models/commentModel.js';
 
 const app = express();
@@ -45,7 +45,7 @@ app.use('/chat', chatRoutes);
 app.use('/comments', commentRoutes);
 
 async function startServer() {
-  await ensureServerKeys();
+  await initializeKeyManagement();
   await deleteExpiredComments();
   setInterval(() => {
     deleteExpiredComments().catch((error) => {

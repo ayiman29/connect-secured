@@ -2,6 +2,7 @@ import pool from '../db.js'
 import { createUser } from './userModel.js';
 import { getEmailLookup } from '../lib/security/cryptoService.js';
 import { decryptWithRsa } from '../lib/security/crypto101RsaService.js';
+import { decryptCourseFields, decryptSectionFields } from '../lib/security/courseCryptoService.js';
 
 
 export async function createStudent(studentId, email, name, password, credit) {
@@ -39,14 +40,14 @@ export async function fetchCoursesWithSections(courseId = null) {
   const query = `
     SELECT 
       c.course_id,
-      c.title,
-      c.name AS course_name,
-      c.exam_schedule,
+      c.title_encrypted,
+      c.name_encrypted AS course_name_encrypted,
+      c.exam_schedule_encrypted,
       c.course_credit,
       s.section_id,
-      s.schedule,
+      s.schedule_encrypted,
       s.seat_availability,
-      s.faculty
+      s.faculty_encrypted
     FROM course c
     JOIN section s ON c.course_id = s.course_id
     ${courseId ? 'WHERE c.course_id = ?' : ''}
@@ -59,12 +60,12 @@ export async function fetchCoursesWithSections(courseId = null) {
   const courseMap = new Map();
 
   for (const row of rows) {
+    const courseFields = await decryptCourseFields(row);
+    const sectionFields = await decryptSectionFields(row);
     if (!courseMap.has(row.course_id)) {
       courseMap.set(row.course_id, {
         course_id: row.course_id,
-        title: row.title,
-        course_name: row.course_name,
-        exam_schedule: row.exam_schedule,
+        ...courseFields,
         course_credit: row.course_credit,
         sections: []
       });
@@ -72,9 +73,9 @@ export async function fetchCoursesWithSections(courseId = null) {
 
     courseMap.get(row.course_id).sections.push({
       section_id: row.section_id,
-      schedule: row.schedule,
+      schedule: sectionFields.schedule,
       seat_availability: row.seat_availability,
-      faculty: row.faculty
+      faculty: sectionFields.faculty
     });
   }
 
@@ -143,7 +144,7 @@ export async function addCourse(studentId, courseId, sectionId, advisorId) {
 
 
     const [[section]] = await conn.query(
-      `SELECT schedule, seat_availability 
+      `SELECT schedule_encrypted, seat_availability 
        FROM section 
        WHERE course_id = ? AND section_id = ?`,
       [courseId, sectionId]
@@ -151,7 +152,7 @@ export async function addCourse(studentId, courseId, sectionId, advisorId) {
     if (!section) throw new Error('Section not found');
     if (section.seat_availability <= 0) throw new Error('No seats available in this section');
 
-    const newSchedule = section.schedule;
+    const newSchedule = await decryptWithRsa(section.schedule_encrypted);
 
  
     if (existingEntry) {
@@ -160,7 +161,7 @@ export async function addCourse(studentId, courseId, sectionId, advisorId) {
       }
 
       const [otherCourses] = await conn.query(
-        `SELECT s.schedule
+        `SELECT s.schedule_encrypted
          FROM manages m
          JOIN section s ON m.course_id = s.course_id AND m.section_id = s.section_id
          WHERE m.student_id = ? 
@@ -168,7 +169,8 @@ export async function addCourse(studentId, courseId, sectionId, advisorId) {
         [studentId, courseId, existingEntry.section_id]
       );
 
-      const hasClash = otherCourses.some(row => row.schedule === newSchedule);
+      const otherSchedules = await Promise.all(otherCourses.map((row) => decryptWithRsa(row.schedule_encrypted)));
+      const hasClash = otherSchedules.some(schedule => schedule === newSchedule);
       if (hasClash) throw new Error('Schedule clash detected. Section not changed.');
 
 
@@ -186,14 +188,15 @@ export async function addCourse(studentId, courseId, sectionId, advisorId) {
       );
     } else {
       const [existing] = await conn.query(
-        `SELECT s.schedule
+        `SELECT s.schedule_encrypted
          FROM manages m
          JOIN section s ON m.course_id = s.course_id AND m.section_id = s.section_id
          WHERE m.student_id = ?`,
         [studentId]
       );
 
-      const hasClash = existing.some(row => row.schedule === newSchedule);
+      const existingSchedules = await Promise.all(existing.map((row) => decryptWithRsa(row.schedule_encrypted)));
+      const hasClash = existingSchedules.some(schedule => schedule === newSchedule);
       if (hasClash) throw new Error('Schedule clash detected. Course not added.');
     }
 
@@ -294,18 +297,23 @@ export async function getMyCourses(studentId) {
   const [courses] = await pool.query(
     `SELECT 
         c.course_id,
-        c.title,
-        c.name,
+        c.title_encrypted,
+        c.name_encrypted AS course_name_encrypted,
+        c.exam_schedule_encrypted,
         s.section_id,
-        s.schedule,
-        s.faculty
+        s.schedule_encrypted,
+        s.faculty_encrypted
      FROM manages m
      JOIN course c ON m.course_id = c.course_id
      JOIN section s ON m.course_id = s.course_id AND m.section_id = s.section_id
      WHERE m.student_id = ?`,
     [studentId]
   );
-  return courses;
+  return Promise.all(courses.map(async (course) => ({
+    ...course,
+    ...(await decryptCourseFields(course)),
+    ...(await decryptSectionFields(course)),
+  })));
 }
 
 

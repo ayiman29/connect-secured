@@ -140,6 +140,29 @@ await ensureServerKeys();
 
 The old `ENCRYPTION_KEY` is required only while migrating legacy AES-encrypted rows. After all PII and TOTP values have been converted, it can be removed from the runtime environment. `EMAIL_LOOKUP_KEY` must remain because email lookup continues to use HMAC-SHA256.
 
+### Key Management and ECC Private-Key Protection
+
+The backend uses a dedicated key-management service for the server RSA key used to protect server-only secrets and chat key material. The service:
+
+- Generates the server RSA key pair through `crypto101` if it does not exist.
+- Loads the active key before the server accepts requests.
+- Stores key-version metadata separately from the database.
+- Keeps retired RSA key backups so versioned ciphertext can still be read during rotation.
+- Prevents key files and metadata from being committed through `.gitignore`.
+
+The key files are local educational-project storage. In production, replace this storage with a KMS or vault such as Azure Key Vault, AWS KMS, or HashiCorp Vault. The database should never be the source of truth for master private keys.
+
+Chat ECC private keys are no longer stored as plaintext in `user_ecc_key.private_key`. They are encrypted with the managed server RSA key and stored as `private_key_encrypted`. The backend decrypts the ECC private scalar only in memory when it needs to unwrap a chat session key; it is never sent to the frontend.
+
+For an existing chat database, apply the column migration and then backfill the keys:
+
+```bash
+mysql -u <db_user> -p <database_name> < migrations/encrypt_ecc_private_keys.sql
+npm run migrate:ecc-keys
+```
+
+To rotate the server key, use the internal `rotateManagedKey()` operation from a controlled administrative script. The previous key is retained as `server_rsa_keys_<version>.json` until all ciphertext created with that version has been re-encrypted. Never delete a retired key before its data has been migrated and verified.
+
 ### Student Problem Reports
 
 Problem reports use the project's `crypto101` RSA service. The student sends the problem text to the backend, where it is encrypted with the registrar's RSA public key before being stored in `report.encrypted_problem`. The registrar retrieves the report and the backend decrypts it with the registrar's private key. The private key is kept outside the database and is used only by the backend decryption flow.
@@ -234,6 +257,15 @@ If the database was created before 2FA was added, apply the TOTP migration once:
 mysql -u <db_user> -p <database_name> < migrations/add_totp_to_user.sql
 ```
 
+To encrypt existing course and section descriptive fields with RSA, first add the encrypted columns and then backfill them:
+
+```bash
+mysql -u <db_user> -p <database_name> < migrations/encrypt_course_data.sql
+npm run migrate:course-rsa
+```
+
+The migration converts course title, course name, exam schedule, section schedule, and faculty, then removes their old plaintext columns. Internal IDs, course credits, and seat counters remain numeric because the backend must use them for joins, credit limits, availability checks, and transactions.
+
 ### Encrypted Student-Advisor Chat
 
 Apply the chat migration after the main university schema has been created:
@@ -280,7 +312,7 @@ The advisor contact list is limited to the authenticated advisor's existing chat
 
 ```text
 user_ecc_key
-	user_id, public_key_x, public_key_y, private_key
+	user_id, public_key_x, public_key_y, private_key_encrypted
 
 chat_session
 	student_id, advisor_id
