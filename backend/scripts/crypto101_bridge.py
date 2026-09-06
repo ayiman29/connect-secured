@@ -13,19 +13,12 @@ import secrets
 import hashlib
 
 # Locate crypto101 directory
-crypto101_dir = os.environ.get("CRYPTO101_PATH")
-if not crypto101_dir or not os.path.exists(crypto101_dir):
-    default_dir = r"c:\Users\ayima\PROJECTS\crypto101"
-    if os.path.exists(default_dir):
-        crypto101_dir = default_dir
-    else:
-        # Fallback to sibling directory
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        sibling_dir = os.path.abspath(os.path.join(script_dir, "..", "..", "..", "crypto101"))
-        if os.path.exists(sibling_dir):
-            crypto101_dir = sibling_dir
+# crypto101 is located at ../crypto101 relative to this script
 
-if not crypto101_dir or not os.path.exists(crypto101_dir):
+script_dir = os.path.dirname(os.path.abspath(__file__))
+crypto101_dir = os.path.abspath(os.path.join(script_dir, "..", "crypto101"))
+
+if not os.path.exists(crypto101_dir):
     sys.stderr.write(f"Error: crypto101 directory not found at {crypto101_dir}\n")
     sys.exit(1)
 
