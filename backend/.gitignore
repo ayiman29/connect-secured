@@ -4,3 +4,4 @@ package-lock.json
 config/server_rsa_keys.json
 config/server_rsa_keys_*.json
 config/server_key_metadata.json
+.venv
