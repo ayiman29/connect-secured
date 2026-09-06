@@ -195,6 +195,172 @@ The frontend account control is a three-dot menu. It provides:
 
 The profile view intentionally contains no edit control; editing is available only through the separate menu option.
 
+### Serial Implementation Change Record
+
+The following record lists the implemented security changes in the order a request flows through the system. It also identifies the main files changed for each feature. Migration and conversion scripts are listed for traceability only; the normal runtime flow is handled by the application files below.
+
+#### 1. Cryptography bridge and RSA key services
+
+The Python bridge connects Node.js to the existing `crypto101` RSA implementation. The RSA service manages the registrar key pair for reports and the server key pair for PII, TOTP, comments, and course data.
+
+**Runtime order:** `app.js` -> `keyManagementService.js` -> `crypto101RsaService.js` -> `crypto101_bridge.py` -> `crypto101` RSA implementation.
+
+**Files:**
+
+- `backend/app.js`: initializes managed RSA keys before accepting requests.
+- `backend/lib/security/crypto101RsaService.js`: starts the Python bridge, generates/loads keys, encrypts, and decrypts RSA chunks.
+- `backend/lib/security/keyManagementService.js`: adds active key versions, retired-key support, managed encryption, and rotation metadata.
+- `backend/scripts/crypto101_bridge.py`: exposes RSA and ECC bridge commands.
+- `backend/config/server_rsa_keys.json`: local server RSA key material, ignored by Git.
+- `backend/config/server_key_metadata.json`: local active/retired key metadata, ignored by Git.
+
+#### 2. User registration and encrypted account data
+
+**Runtime order:** `POST /auth/signup` -> `authController.js` -> role model -> `userModel.js` -> RSA service -> `user` table.
+
+**Files:**
+
+- `backend/routes/authRoutes.js`: exposes `/auth/signup`.
+- `backend/controllers/authController.js`: validates registration input and passes address/phone through.
+- `backend/models/studentModel.js`: creates student records and forwards profile fields.
+- `backend/models/advisorModel.js`: creates advisor records and forwards profile fields.
+- `backend/models/registrarModel.js`: creates registrar records and forwards profile fields.
+- `backend/models/userModel.js`: hashes passwords with bcrypt, encrypts email/name/address/phone with RSA, and creates the HMAC email lookup.
+- `backend/migrations/university5_encrypted_schema.sql`: defines encrypted user columns for a clean schema.
+
+Stored account fields:
+
+```text
+email_encrypted
+name_encrypted
+address_encrypted
+phone_encrypted
+password              bcrypt hash, not encryption
+email_lookup          HMAC-SHA256 lookup value
+```
+
+#### 3. Login, TOTP enrollment, and two-factor verification
+
+**Runtime order:** `POST /auth/login` -> password lookup/decryption -> bcrypt comparison -> pre-auth JWT -> TOTP setup or verification -> full session JWT.
+
+**Files:**
+
+- `backend/routes/authRoutes.js`: exposes `/auth/login`, `/auth/setup-totp`, and `/auth/verify-totp`.
+- `backend/controllers/authController.js`: issues the five-minute pre-auth token, generates the TOTP QR code, decrypts the RSA-protected TOTP secret, verifies the code, and issues the one-hour session token.
+- `backend/models/userModel.js`: stores the TOTP secret using RSA and tracks `totp_enabled`.
+- `backend/middleware/authMiddleware.js`: verifies the full JWT for protected routes.
+- `frontend/vite-project/src/AuthView.jsx`: renders login, TOTP enrollment, and TOTP verification screens.
+
+The pre-auth token cannot access protected application routes. A full session token is issued only after the second factor succeeds.
+
+#### 4. Course and section descriptive-data encryption
+
+**Write order:** registrar form -> registrar route/controller -> `registrarModel.js` -> `courseCryptoService.js` -> RSA service -> encrypted course/section columns.
+
+**Read order:** student/advisor route/controller -> student/advisor model -> `courseCryptoService.js` -> RSA service -> normal frontend response.
+
+**Files:**
+
+- `backend/controllers/registrarController.js`: receives course and section values.
+- `backend/models/registrarModel.js`: encrypts title, name, exam schedule, schedule, and faculty on write.
+- `backend/lib/security/courseCryptoService.js`: groups course/section RSA field encryption and decryption.
+- `backend/models/studentModel.js`: decrypts course data and decrypts schedule values for clash checks.
+- `backend/models/advisorModel.js`: decrypts course data for advisor views and waiting-student views.
+- `backend/migrations/university5_encrypted_schema.sql`: defines encrypted course/section columns in a clean schema.
+
+Numeric IDs, course credits, seat availability, and relationship values remain operational database values for joins and transactions.
+
+#### 5. RSA-encrypted student problem reports
+
+**Student write order:** student form -> `POST /students/report` -> `studentController.js` -> `crypto101RsaService.js` registrar public key -> `reportModel.js` -> `report.encrypted_problem`.
+
+**Registrar read order:** registrar report list -> `GET /registrars/reports` -> `reportModel.js` decrypts student name -> registrar selects a report -> `POST /registrars/reports/:reportId/decrypt` -> registrar private key -> normal problem text.
+
+**Files:**
+
+- `frontend/vite-project/src/StudentView.jsx`: submits a normal problem description without exposing encryption details.
+- `frontend/vite-project/src/RegistrarView.jsx`: lists reports, displays decrypted content on request, and marks reports done.
+- `backend/controllers/studentController.js`: encrypts submitted report text.
+- `backend/controllers/registrarController.js`: authorizes report access and decrypts report text.
+- `backend/models/reportModel.js`: stores and retrieves report ciphertext and decrypts student names with server RSA.
+- `backend/lib/security/crypto101RsaService.js`: manages the registrar RSA pair and report encryption.
+- `backend/migrations/report_schema.sql`: defines the report ciphertext column.
+
+#### 6. ECC-protected student-advisor chat
+
+**Session creation order:** chat UI -> `GET /chat/session` -> `chatController.js` -> `chatModel.js` -> ECC key generation -> ECC-wrapped shared AES session key -> `chat_session`.
+
+**Message write order:** chat UI -> `POST /chat/send` -> participant authorization -> ECC private-key unwrap -> AES-GCM encryption -> HMAC-SHA256 MAC -> `chat_message`.
+
+**Message read order:** chat UI -> `GET /chat/messages/:sessionId` -> participant authorization -> ECC private-key unwrap -> HMAC verification -> AES-GCM tag verification -> AES-GCM decryption -> normal message text.
+
+**Files:**
+
+- `frontend/vite-project/src/ChatWidget.jsx`: handles advisor/student selection, message display, polling, and sending.
+- `frontend/vite-project/src/ChatWidget.css`: styles the chat drawer.
+- `backend/routes/chatRoutes.js`: exposes chat session, advisor list, contacts, message, and send routes.
+- `backend/controllers/chatController.js`: enforces participant ownership, unwraps keys, applies encryption, and verifies MACs.
+- `backend/models/chatModel.js`: stores sessions/messages and encrypts/decrypts ECC private keys through key management.
+- `backend/lib/security/chatCryptoService.js`: performs ECC bridge calls, AES-GCM message encryption, and HMAC-SHA256 MAC creation/verification.
+- `backend/migrations/chat_schema.sql`: defines ECC key, session, and encrypted message storage.
+- `backend/migrations/add_chat_mac.sql`: adds the explicit message MAC column for existing chat schemas.
+
+Integrity layers:
+
+1. ECC protects the shared session key for each participant.
+2. AES-GCM protects message confidentiality and supplies an authentication tag.
+3. HMAC-SHA256 covers message ciphertext and sender/session metadata.
+
+#### 7. RSA protection for ECC private keys
+
+**Runtime order:** chat model requests user ECC keys -> managed key service decrypts the versioned RSA envelope -> private ECC scalar exists only in backend memory -> ECC unwraps the chat session key.
+
+**Files:**
+
+- `backend/models/chatModel.js`: stores `private_key_encrypted` and decrypts it only when needed.
+- `backend/lib/security/keyManagementService.js`: adds the versioned RSA envelope around the ECC private key.
+- `backend/migrations/encrypt_ecc_private_keys.sql`: defines the encrypted key column for an existing chat schema.
+- `backend/scripts/migrateEccPrivateKeys.js`: conversion utility retained for database history.
+
+#### 8. Shared Comment section
+
+**Create order:** Comment form -> `POST /comments` -> `commentController.js` -> `commentModel.js` -> RSA encryption -> `comment.content_encrypted`.
+
+**Read order:** Comment section -> `GET /comments` -> expiry cleanup -> RSA decryption -> author/content response.
+
+**Edit/delete order:** Comment action -> `PUT` or `DELETE /comments/:commentId` -> JWT ownership check -> encrypted update or deletion. Registrars may delete any comment; other roles may delete only their own.
+
+**Files:**
+
+- `frontend/vite-project/src/CommentSection.jsx`: shared create/view/edit/delete UI for all roles.
+- `frontend/vite-project/src/CommentSection.css`: Comment section presentation.
+- `backend/routes/commentRoutes.js`: exposes comment endpoints for all authenticated roles.
+- `backend/controllers/commentController.js`: validates content and enforces permissions.
+- `backend/models/commentModel.js`: encrypts content, decrypts responses, and removes expired comments.
+- `backend/migrations/comment_schema.sql`: defines 24-hour comment expiry storage.
+- `backend/app.js`: runs expiry cleanup at startup and every ten minutes.
+
+#### 9. Profile editing and account controls
+
+**Registration order:** signup form -> `POST /auth/signup` -> role model -> `userModel.js` -> RSA-encrypted address/phone.
+
+**View order:** three-dot menu -> View profile -> `GET /auth/profile` -> read-only profile display.
+
+**Edit order:** three-dot menu -> Edit profile -> `GET /auth/profile` -> edit form -> `PUT /auth/profile` -> RSA-encrypted update.
+
+**Logout order:** three-dot menu or profile dialog -> logout handler -> local JWT/user removal -> login screen.
+
+**Files:**
+
+- `frontend/vite-project/src/AuthView.jsx`: collects address and phone during registration.
+- `frontend/vite-project/src/ProfileMenu.jsx`: three-dot menu, read-only profile view, edit profile view, and logout controls.
+- `frontend/vite-project/src/ProfileMenu.css`: account menu and profile dialog styles.
+- `frontend/vite-project/src/App.jsx`: mounts the account menu and owns logout/session state.
+- `backend/routes/authRoutes.js`: exposes authenticated profile endpoints.
+- `backend/controllers/authController.js`: handles profile reads and updates.
+- `backend/models/userModel.js`: encrypts and decrypts profile fields.
+- `backend/migrations/add_profile_fields.sql`: defines address and phone columns for an existing schema.
+
 ### Student Problem Reports
 
 Problem reports use the project's `crypto101` RSA service. The student sends the problem text to the backend, where it is encrypted with the registrar's RSA public key before being stored in `report.encrypted_problem`. The registrar retrieves the report and the backend decrypts it with the registrar's private key. The private key is kept outside the database and is used only by the backend decryption flow.
